@@ -24,6 +24,9 @@ and all are dynamic, meaning that changes show up instantly.
 Schemas are embedded in the data itself for instant extension
 as new forms of data arrive.
 
+There is also a fast binary protocol to remote servers for
+distributed access called 'ItemPacket'.
+
 All server access is TLS protected. There are users, permissions,
 roles, grants, databases, and fine-grained query
 interface permissions.
