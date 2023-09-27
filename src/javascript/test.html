@@ -1,0 +1,50 @@
+<head></head>
+<body>
+	
+<script>
+function get() {
+	var xhr = new XMLHttpRequest();
+	var username = 'testUser';
+	var password = 'db';
+	
+	var resultContainer = document.getElementById('result');
+	xhr.onreadystatechange = function() {
+	  if (xhr.readyState === 4) {
+	    if (xhr.status === 200) {
+	      // The request is complete and successful
+	      var responseObject = JSON.parse(xhr.responseText);
+	      // format with indention 2
+	      var responseJson = JSON.stringify(responseObject, null, 2);
+	      console.log(responseJson);
+	      
+	      var subtext = responseObject.Basics._description[0];
+	      
+	      // Set the content of the resultContainer element
+//	      resultContainer.innerHTML = responseJson;
+      	  resultContainer.innerHTML = subtext;
+	    } else {
+	      // Handle errors here
+      	  resultContainer.innerHTML = 'Request failed with status:' + xhr.status;
+	      console.error('Request failed with status:', xhr.status);
+	    }
+	  }
+	};
+	
+	xhr.open('GET', 'https://infinitydb.com:37411/infinitydb/data/demo/readonly/Documentation', true);
+	
+	// Add Basic Authentication header
+	var credentials = username + ':' + password;
+	var encodedCredentials = btoa(credentials);
+	xhr.setRequestHeader('Authorization', 'Basic ' + encodedCredentials);
+	
+	xhr.send();
+}
+</script>
+
+<form>
+	<input type="button" onclick="get()" value="Load"></input></form>
+	<pre>
+		<div id="result" name="result"></div>
+	</pre>
+</form>	
+</body>
