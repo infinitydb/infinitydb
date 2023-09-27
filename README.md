@@ -3,7 +3,9 @@ The open-source REST client access code for the InfinityDB
 NoSQL Java DBMS at boilerbay.com.
 
 There is helper code for Java, JavaScript, and Python for REST, but
-you can do it directly as well. 
+you can do it directly as well. The python can be imported with
+python3 -m pip install --upgrade infinitydb. Keep your pip
+up to date as well.
 
 Infinitydb is at boilerbay.com in the form 
 of either a complete server InfinityDB Server, or as a Java jar
