@@ -1,0 +1,139 @@
+// MIT License
+//
+// Copyright (c) 2023 Roger L. Deran
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
+package com.infinitydb.simplerest;
+
+import java.io.CharArrayWriter;
+
+/**
+ * Show how to use the com.infinitydb.simplerest code to do client-side REST access.
+ * 
+ * There is a JSON parser/formatter and a Json structure with subclasses that
+ * make access easy.
+ */
+public class InfinityDBSimpleRestClientDemo {
+
+    public static void main(String[] args) throws Exception {
+        try {
+            String host =
+                    "https://infinitydb.com:37411/infinitydb/data/demo/readonly";
+//             String host =
+//             "http://localhost:37411/infinitydb/data/demo/writeable";
+            System.out.println("host=" + host);
+            InfinityDBSimpleRestClient idb = new InfinityDBSimpleRestClient(host);
+            idb.setUserNameAndPassWord("testUser", "db");
+
+            Blob response = null;
+            for (int i = 0; i < 10; i++) {
+//                 response = idb.get(new EntityClass("Documentation"),"Basics",new
+//                         Attribute("description"), new Index(0));
+                //response = idb.get(new EntityClass("Documentation"));
+//                response = idb.get(new EntityClass("Documentation"),"Basics");
+                // A binary Blob - very fast but only one at a time.
+//                 response = idb.get(new EntityClass("Pictures"),"pic0");
+                // All pictures in JSON
+//                 response = idb.get(new EntityClass("Pictures"));
+                // List of ByteArray
+                // response = idb.get(new EntityClass("Pictures"),"pic0",new
+                // Attribute("com.infinitydb.Blob"), new
+                // Attribute("com.infinitydb.Blob.bytes"));
+                // All queries
+                 response = idb.get(new EntityClass("Query"));
+                // Read the text of the query - not executing it.
+                // response = idb.get(new EntityClass("Query"),"examples","Aircraft
+                // to AircraftModel");
+                // response = idb.get(new EntityClass("Query"),"examples","fish farm
+                // profit");
+                 
+                // The entire DB: TODO XXXX BROKEN - never returns due to
+                // transaction retrying!.
+                // response = idb.get();
+                 
+                printTime("IO", response.length());
+            }
+
+            String contentType = response.getContentType();
+            if (!contentType.equals("application/json"))
+                return;
+
+            String s = response.toString();
+            printTime("response.toString()", response.length());
+            // System.out.println("Response: "+ s);
+
+            JsonElement root = new JsonParser(s).parse();
+            printTime("parse", response.length());
+
+            String formatted = root.toString();
+//             System.out.println("Formatted: " + formatted);
+            printTime("root.toString()", formatted.length());
+
+            // Do another round to see if it stays the same 
+            JsonElement root2 = new JsonParser(formatted).parse();
+            String formatted2 = root2.toString();
+//             System.out.println("Formatted2: " + formatted2);
+
+            // Test: should be equal.
+            System.out.println("Consistent format and parse back: " + root.equals(root2));
+            if (!root.equals(root2)) 
+                throw new RuntimeException("JsonElement trees differ.");
+
+            /*
+             * You can print in the special 'extended JSON' format specific to
+             * InfinityDB in which we avoid quoting keys as double-quoted strings. 
+             * There is a display mode in the browser for it, and it is
+             * quite relaxing. 
+             */
+            String formattedExtended = root.toStringAsExtendedFormat();
+            printTime("toStringAsExtendedFormat()", formattedExtended.length());
+//            System.out.println("Extended Format: " + formattedExtended);
+            JsonElement rootExtended = new JsonParser(formattedExtended, false).parse();
+            printTime("parse ExtendedFormat", formattedExtended.length());
+            
+            // Do another round to see if it is consistent.
+            String formattedExtended2 = rootExtended.toStringAsExtendedFormat();
+//            System.out.println("Extended Format re-formatted: " + formattedExtended2);
+            printTime("toStringAsExtendedFormat() again", formattedExtended2.length());
+
+             // Test: should be equal.
+             System.out.println("Consistent format and parse back in Extended format: " 
+                     + root.equals(rootExtended));
+             if (!root.equals(rootExtended)) 
+                 throw new RuntimeException("JsonElement trees differ in extended mode.");
+        } catch (Exception e) {
+            e.printStackTrace();
+            throw e;
+        }
+    }
+
+
+    static long t = System.currentTimeMillis();
+
+    static void printTime(String msg, int len) {
+        long t2 = System.currentTimeMillis();
+        double time = (t2 - t) / 1e3;
+        System.out.println(msg + " time=" + time
+                + " len=" + len
+                + " speed=" + len / time);
+        t = t2;
+    }
+}
+
