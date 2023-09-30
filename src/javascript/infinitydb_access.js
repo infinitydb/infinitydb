@@ -20,31 +20,263 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-// Instead of these, you can also write { _myAttribute : 5; }
+// Here are the classes that represent the 12 InfinityDB data types that
+// are not primitive..
 
+// Instead of these, you can also write { _MyClass : 5; }
 class EntityClass {
 	constructor(name) {
 		this.name = name;
 	}
 
+	static isValidEntityClass(s) {
+		const metaRegex = /^[A-Z][a-zA-Z\d\._]*$/;
+		return metaRegex.test(s);
+	}
+	
 	toString() {
 		return this.name;
 	}
 }
 
+// Instead of these, you can also write { _myAttribute : 5; }
 class Attribute {
 	constructor(name) {
 		this.name = name;
 	}
+	
+	static isValidAttribute(s) {
+		const metaRegex = /^[a-z][a-zA-Z\d\._]*$/;
+		return metaRegex.test(s);
+	}
 
 	toString() {
 		return this.name;
 	}
 }
 
-// Note we consider ArrayBuff to be UTF-8, not InfinityDB byte array!
-// To get blobs, use action=get-blob, action=put-blob, action=execute-get-blob-query,
-// or action=put-blob-query.
+// Instead of this you can also write '_[n]' like '_[55]', but that
+// will not normally be necessary because these will be hidden
+// since parsing will produce lists. These are for including within
+// Items in order to indicate an offset in a list. That may still
+// happen in a URL path, though.
+class Index {
+	constructor(index) {
+		if (index == null) {
+			index = 0;
+		} else if (typeof index !== 'number') {
+   			throw new Error('Constructing an Index: expected a number but was ' + index);
+		}
+		this.index = index;
+	}
+	parse(s) {
+		if (typeof s === 'string') {
+			if (s.startsWith('Index(') && s.endsWith(')')) {
+				s = s.slice(6, -1);
+			} else if (s.startsWith('[') && s.endsWith(']')) {
+				s = s.slice(1, -1);
+			} else {
+			   	throw new Error('expected string to parse as Index(n) or [n] but was ' + s);
+			}
+		} else {
+			 throw new Error('expected string to parse an Index but was ' + s);
+		}
+		this.index = parseInt(s);
+		if (isNaN(this.index) || !Number.isInteger(this.index)) {
+			throw new Error('expected "Index(n) but n is not an integer: it was "' + this.index);
+		}
+		return this;
+	}
+	
+	getIndex() {
+		return this.index;
+	}
+
+	toString() {
+		return '[' + this.index + ']';
+	}
+}
+
+// private: use Bytes and ByteString.
+class ByteArrayBase {
+	// private
+	constructor(name, o) {
+		this.name = name;
+		if (o == null) {
+			this.bytes = new Uint8Array();
+		} else if (o instanceof Uint8Array) {
+			this.bytes = o;
+		}  else {
+	   		throw new Error('expected Uint8Array: ' + o);
+		}
+	}
+	parse(o) {
+		if (typeof o === 'string') {
+			if (!o.startsWith(this.name + '(') || !o.endsWith(')')) {
+		   		throw new Error('expected "' + this.name + '(...) " but was ' + o);
+			}
+			this.bytes = fromHexWithUnderscores(o.slice(this.name.length + 1, -1));
+		}  else {
+	   		throw new Error('expected string: ' + o);
+		}
+		return this;
+	}
+	getBytes() {
+		return this.bytes;
+	}	
+
+	toString() {
+//		console.log('thisname' + this.name + ' bytes=' + this.bytes);
+		return this.name + '(' + toHexWithUnderscores(this.bytes) + ')';
+	}
+}
+
+class Bytes extends ByteArrayBase {
+	constructor(o) {
+		super('Bytes', o);
+	}
+}
+
+// Like Bytes(), but stored in InfinityDB so that it sorts like a string
+// whereas Bytes() sorts according to its initial length code.
+class ByteString extends ByteArrayBase {
+	constructor(o) {
+		super('ByteString', o);
+	}
+}
+
+/*
+function fromHexNybble(c) {
+    const v = parseInt(c, 16);
+    
+
+    if (isNaN(v) || c !== c.toUpperCase() || v < 0 || v > 15) {
+        throw new Error('Hex has an invalid character or is not in uppercase: c=' + c);
+    }
+    return v;
+}
+
+function fromHexWithUnderscores(s) {
+	if (s.length == 0) {
+		return new Uint8Array();
+	}
+    if ((s.length + 1) % 3 !== 0)
+      throw new Error('Hex has an invalid length - must be 3*n - 1: ' +
+      	'length=' + s.length + ' o=' +  s);
+
+    const bytes = new Uint8Array((s.length + 1) / 3);
+
+    for (let i = 0; i + 1 < s.length; i += 3) {
+        const top = s.charAt(i);
+        const topNybble = fromHexNybble(top);
+
+        const bottom = s.charAt(i + 1);
+        const bottomNybble = fromHexNybble(bottom);
+
+		if (i + 2 < s.length) {
+	        const u = s.charAt(i + 2);
+	        if (u !== '_')
+	            throw new Error('Expected underscore: ' + u);
+	     }
+
+        const b = (topNybble << 4) + bottomNybble;
+    	bytes[i / 3] = b;
+  	}
+  	console.log(bytes);
+  	return bytes;
+}
+*/
+
+function fromHexWithUnderscores(s) {
+	if (s.length == 0) {
+		return new Uint8Array();
+	}
+    if ((s.length + 1) % 3 !== 0)
+      throw new Error('Hex has an invalid length - must be 3*n - 1: ' +
+      	'length=' + s.length + ' o=' +  s);
+
+    const bytes = new Uint8Array((s.length + 1) / 3);
+
+    for (let i = 0; i + 1 < s.length; i += 3) {
+		const hex = s.slice(i, i + 2);
+    	const b = parseInt(hex, 16);
+	    
+	    if (isNaN(b) || hex !== hex.toUpperCase() || b < 0 || b > 0xff) {
+	        throw new Error('Hex has an invalid character or is not in uppercase: hex=' + hex + ' b=' + b);
+	    }
+		if (i + 2 < s.length) {
+	        const u = s.charAt(i + 2);
+	        if (u !== '_')
+	            throw new Error('Expected underscore: ' + u);
+	    }
+    	bytes[i / 3] = b;
+  	}
+  	return bytes;
+}
+
+// We insist on caps
+const hex = '0123456789ABCDEF';
+
+function toHexWithUnderscores(uint8Array) {
+  if (typeof uint8Array !== 'object' || !(uint8Array instanceof Uint8Array)) {
+    throw new Error("Expected a Uint8Array: " + uint8Array);
+  }
+
+  let s = '';
+  let isFirst = true;
+
+  for (let i = 0; i < uint8Array.length; i++) {
+    const byte = uint8Array[i];
+
+    if (byte < 0 || byte > 0xff) {
+      throw new Error("Byte out of range for Uint8Array component: " + byte);
+    }
+
+    const hexValue = hex[(byte >> 4) & 0xf] + hex[byte & 0xf];
+
+    if (!isFirst) {
+      s += '_';
+    }
+    isFirst = false;
+    
+    s += hexValue;
+  }
+  return s;
+}
+
+class Chars {
+	constructor(s) {
+		if (s == null) {
+			this.s = "";
+		} else if (typeof s == 'object' && s instanceof Uint8Array) {
+			const decoder = new TextDecoder('utf-8');
+			this.s = decoder.decode(s);
+		} else if (typeof s === 'string') {
+			this.s = s;
+		} else {
+   			throw new Error('expected string or Uint8Array but was ' + o);
+   		}
+	}
+	
+	parse(s) {
+		if (!s.startsWith('Chars(') || !s.endsWith(')')) {
+			throw new Error('"expected "Chars(jsonstring)" but was ' + s);
+		}
+		this.s = JSON.parse(s.slice(6, -1));
+		return this;
+	}
+	getChars() {
+		return this.s;
+	}
+	
+	toString() {
+		return 'Chars(' + JSON.stringify(this.s) + ')';
+	}
+}
+
+
+// Quote an object of the 12 data types to make it compatible with
+// a string object key.
 function qKey(o) {
 	if (o === null || o === undefined) {
 		throw new TypeError('keys must not be null');
@@ -52,24 +284,27 @@ function qKey(o) {
 		return o ? '_true' : '_false';
 	} else if (typeof o === 'number') {
 		// default is always double! You do not have to quote! You will forget this.
+		// We can't test for qFloat() or qLong() so you have to do that
+		// yourself..
 		return qDouble(o);
 	} else if (typeof o === 'string') {
 		return o.charAt(0) !== '_' ? o : '_' + o;
 	} else if (o instanceof Date) {
 		return '_' + o.toISOString();
-	} else if (o instanceof EntityClass || o instanceof Attribute) {
+	} else if (o instanceof EntityClass 
+		|| o instanceof Attribute
+		|| o instanceof Bytes
+		|| o instanceof ByteString 
+		|| o instanceof Chars
+		|| o instanceof Index) {
 		return '_' + o.toString();
-	} else if (typeof o === 'object' && o.constructor === ArrayBuffer) {
-		// Convert ArrayBuffer to a string representation (works in both contexts)
-		const decoder = new TextDecoder('utf-8');
-		const decodedString = decoder.decode(o);
-		return decodedString.charAt(0) !== '_' ? decodedString : '_' + decodedString;
+	} else if (o instanceof Uint8Array) {
+		return '_' + new Bytes(o).toString();
 	} else {
-		throw new TypeError('keys must be primitive or date');
+		throw new TypeError('Uknown data type: cannot underscore-quote: ' + o);
 	}
 }
 
-// Only needed for keys, or just use qKey() everywhere
 function qDouble(n) {
 	return '_' + toDoubleString(n);
 }
@@ -94,9 +329,12 @@ function toLongString(n) {
 	return '' + Math.floor(n);
 }
 
-// Note when the JSON is parsed at the InfinityDB end, all numbers
-// are considered double, so you have to use qLong(n) and qFloat(n)
-// instead to provide context and generate '_5' or '_5.0f'.
+// Quote something of the 12 data types to make it compatible with
+// an object value. We don't change boolean or number into
+// strings though, which means InfinityDB will interpret the
+// number as a double! If you want to have the number underscore
+// quoted, use qLong(n) or qFloat(n) to generate '_5' or '_5.0f'.
+
 function qValue(o) {
 	if (o === null || o === undefined) {
 		return null;
@@ -134,12 +372,20 @@ function uq(o) {
 		return parseFloat(o.slice(0, -1));
 	} else if (isValidIsoDate(o)) {
 		return new Date(o);
-	} else if (isValidEntityClass(o)) {
+	} else if (EntityClass.isValidEntityClass(o)) {
 		return new EntityClass(o);
-	} else if (isValidAttribute(o)) {
+	} else if (Attribute.isValidAttribute(o)) {
 		return new Attribute(o);
+	} else if (o.startsWith('Bytes(')) {
+		return new Bytes().parse(o);
+	} else if (o.startsWith('ByteString(')) {
+		return new ByteString().parse(o);
+	} else if (o.startsWith('Chars(')) {
+		return new Chars().parse(o);
+	} else if (o.startsWith('Index(') || o.startsWith('[')) {
+		return new Index().parse(o);
 	} else {
-		throw new TypeError('cannot underscore-unquote ' + o);
+		throw new TypeError('cannot underscore-unquote value=' + o);
 	}
 }
 
@@ -149,16 +395,7 @@ function isValidIsoDate(dateString) {
 }
 
 
-function isValidEntityClass(s) {
-	const metaRegex = /^[A-Z][a-zA-Z\d\._]*$/;
-	return metaRegex.test(s);
-}
-
-function isValidAttribute(s) {
-	const metaRegex = /^[a-z][a-zA-Z\d\._]*$/;
-	return metaRegex.test(s);
-}
-
+// Demonstrate some fundametal ways to work with the 12 data types.
 function exampleCreateObject() {
 	const o = 'anything';
 	// any string at all
@@ -207,16 +444,43 @@ function exampleCreateObject() {
 		[qKey(C)]: qValue(C),
 		[qKey(a)]: qValue(a),
 		[qKey(true)]: true,
-		[qKey(false)]: false
+		[qKey(false)]: false,
+		[qKey(new Uint8Array())]: '_Bytes()',
+		[qKey(new Bytes(new Uint8Array([1,0xa6])))]: '_Bytes(01_A6)',
+		[qKey(new ByteString(new Uint8Array([1,0xa6])))]: '_ByteString(01_A6)',
+		// Slight problem with backslashing backslashes..
+		[qKey(new Chars('x\'\\\"'))]: '_Chars("x\'\\\"")',
+		[qKey(new Index(5))]: '_[5]',
+		[qKey(new Index(5))]: '_[5]',
 	};
 	return object;
+}
+
+function printType(o) {
+	if (typeof o === 'string') {
+		return 'string';
+	} else if (typeof o === 'boolean') {
+		return 'boolean';
+	} else if (typeof o === 'number') {
+		return 'number';
+	} else if (typeof o === 'object') {
+   		return o.constructor.name;
+	} else if (o === null) {
+		return 'null';
+	} else if (o === undefined) {
+		return '(undefined)';
+	} else {
+		return o;
+	}
 }
 
 function exampleUnquoteObject(o) {
 	for (const key in o) {
 		const k = uq(key);
 		const v = uq(o[key]);
-		console.log(`Key: ${typeof k}:${k}, Value: ${typeof v}:${v}`);
+		const tk = printType(k);
+		const tv = printType(v);
+		console.log(`Key: ${tk}:${k}, Value: ${tv}:${v}`);
 	}
 }
 
