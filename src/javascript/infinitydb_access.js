@@ -145,48 +145,6 @@ class ByteString extends ByteArrayBase {
 	}
 }
 
-/*
-function fromHexNybble(c) {
-    const v = parseInt(c, 16);
-    
-
-    if (isNaN(v) || c !== c.toUpperCase() || v < 0 || v > 15) {
-        throw new Error('Hex has an invalid character or is not in uppercase: c=' + c);
-    }
-    return v;
-}
-
-function fromHexWithUnderscores(s) {
-	if (s.length == 0) {
-		return new Uint8Array();
-	}
-    if ((s.length + 1) % 3 !== 0)
-      throw new Error('Hex has an invalid length - must be 3*n - 1: ' +
-      	'length=' + s.length + ' o=' +  s);
-
-    const bytes = new Uint8Array((s.length + 1) / 3);
-
-    for (let i = 0; i + 1 < s.length; i += 3) {
-        const top = s.charAt(i);
-        const topNybble = fromHexNybble(top);
-
-        const bottom = s.charAt(i + 1);
-        const bottomNybble = fromHexNybble(bottom);
-
-		if (i + 2 < s.length) {
-	        const u = s.charAt(i + 2);
-	        if (u !== '_')
-	            throw new Error('Expected underscore: ' + u);
-	     }
-
-        const b = (topNybble << 4) + bottomNybble;
-    	bytes[i / 3] = b;
-  	}
-  	console.log(bytes);
-  	return bytes;
-}
-*/
-
 function fromHexWithUnderscores(s) {
 	if (s.length == 0) {
 		return new Uint8Array();
