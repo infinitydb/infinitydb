@@ -23,7 +23,12 @@
 // Here are the classes that represent the 12 InfinityDB data types that
 // are not primitive..
 
-// Instead of these, you can also write { _MyClass : 5; }
+// Instead of these, you can also write { _MyClass : 5; }, but that
+// will not normally be necessary because these will be hidden
+// since parsing will produce lists. These are for including within
+// Items in order to indicate an offset in a list. These will still
+// happen in a URL path, though.
+
 class EntityClass {
 	constructor(name) {
 		this.name = name;
@@ -55,11 +60,8 @@ class Attribute {
 	}
 }
 
-// Instead of this you can also write '_[n]' like '_[55]', but that
-// will not normally be necessary because these will be hidden
-// since parsing will produce lists. These are for including within
-// Items in order to indicate an offset in a list. That may still
-// happen in a URL path, though.
+// Instead of this you can also write '_[n]' like '_[55]'
+
 class Index {
 	constructor(index) {
 		if (index == null) {
@@ -131,19 +133,38 @@ class ByteArrayBase {
 	}
 }
 
+// The InfinityDB byte array data type.
+// These are used in a list to create blobs. This way,
+// blobs can be encoded in JSON when necessary. The com.. are Attributes,
+// because they start with '_' and a LC letter. 
+// The Bytes() here are 1024 long except the last, which is 
+// only as long as needed. A blob is like:
+// { 
+//	"_com.infinitydb.blob" : {
+//		 "_com.infinitydb.blob.mimetype" : "text/plain",
+//		 "_com.infinitydb.blob.data" : [
+//			"_Bytes(A6_99)"
+//		 ]
+//    }
+// }
+
 class Bytes extends ByteArrayBase {
 	constructor(o) {
 		super('Bytes', o);
 	}
 }
 
+// The InfinityDB byte string data type.
 // Like Bytes(), but stored in InfinityDB so that it sorts like a string
 // whereas Bytes() sorts according to its initial length code.
+
 class ByteString extends ByteArrayBase {
 	constructor(o) {
 		super('ByteString', o);
 	}
 }
+
+// Convert 'A6_99' to Uint8Array([0xa6,99]) for Bytes and ByteString
 
 function fromHexWithUnderscores(s) {
 	if (s.length == 0) {
@@ -175,6 +196,8 @@ function fromHexWithUnderscores(s) {
 // We insist on caps
 const hex = '0123456789ABCDEF';
 
+// Convert Uint8Array([0xa6,99]) to 'A6_99' for Bytes and ByteString 
+
 function toHexWithUnderscores(uint8Array) {
   if (typeof uint8Array !== 'object' || !(uint8Array instanceof Uint8Array)) {
     throw new Error("Expected a Uint8Array: " + uint8Array);
@@ -202,6 +225,8 @@ function toHexWithUnderscores(uint8Array) {
   return s;
 }
 
+// The InfinityDB char array data type. Used in CLOBs like
+// Bytes, but rarely used.
 class Chars {
 	constructor(s) {
 		if (s == null) {
@@ -232,19 +257,68 @@ class Chars {
 	}
 }
 
+class JavaNumber {
+	constructor(n) {
+		this.n = n;
+	}
+	value() {
+		return this.n;
+	}
+}
+
+class Double extends JavaNumber {
+	constructor(n) {
+		super(n);
+	}
+	// Only for keys: values are left as primitive numbers
+	// This format is how InfinityDB distinguishes a double: always a dot
+	// Within InfinityDB this is binary
+	toString() {
+		return Number.isInteger(this.n) ? this.n + '.0' : this.n.toString();
+	}
+}
+
+class Float extends JavaNumber {
+	constructor(n) {
+		super(n);
+	}
+	// This format is how InfinityDB distinguishes a float: always a dot and 'f'
+	// Within InfinityDB this is binary
+	toString() {
+		return Number.isInteger(this.n) ? this.n + '.0' : this.n.toString() + 'f';
+	}
+}
+
+class Long extends JavaNumber {
+	constructor(n) {
+		super(n);
+		if (!Number.isInteger(n)) {
+			throw new Error('Expected integer for Long(n) but was ' + n);
+		}
+	}
+	// This format is how InfinityDB distinguishes a long: never a dot.
+	// Within InfinityDB this is binary
+	toString() {
+		return this.n.toString();
+	}
+}
 
 // Quote an object of the 12 data types to make it compatible with
 // a string object key.
+
+// The default for numbers is always double! You will forget this.
+// Longs are most common in InfinityDB rather than integer-valued doubles.
+// We can't tell whether to do new Float(o).toString() or qFloat(o)
+// or new Long(o).toString() or qLong(o) so you have to do that
+// yourself from context..
+
 function qKey(o) {
 	if (o === null || o === undefined) {
 		throw new TypeError('keys must not be null');
 	} else if (typeof o === 'boolean') {
 		return o ? '_true' : '_false';
 	} else if (typeof o === 'number') {
-		// default is always double! You do not have to quote! You will forget this.
-		// We can't test for qFloat() or qLong() so you have to do that
-		// yourself..
-		return qDouble(o);
+		return '_' + new Double(o).toString();
 	} else if (typeof o === 'string') {
 		return o.charAt(0) !== '_' ? o : '_' + o;
 	} else if (o instanceof Date) {
@@ -254,7 +328,10 @@ function qKey(o) {
 		|| o instanceof Bytes
 		|| o instanceof ByteString 
 		|| o instanceof Chars
-		|| o instanceof Index) {
+		|| o instanceof Index
+		|| o instanceof Double
+		|| o instanceof Float
+		|| o instanceof Long) {
 		return '_' + o.toString();
 	} else if (o instanceof Uint8Array) {
 		return '_' + new Bytes(o).toString();
@@ -263,40 +340,22 @@ function qKey(o) {
 	}
 }
 
-function qDouble(n) {
-	return '_' + toDoubleString(n);
-}
-
-function toDoubleString(n) {
-	return Number.isInteger(n) ? n + '.0' : n.toString();
-}
-
-function qFloat(n) {
-	return '_' + toFloatString(n);
-}
-
-function toFloatString(n) {
-	return Number.isInteger(n) ? n + '.0f' : n.toString() + 'f';
-}
-
-function qLong(n) {
-	return '_' + toLongString(n);
-}
-
-function toLongString(n) {
-	return '' + Math.floor(n);
-}
 
 // Quote something of the 12 data types to make it compatible with
 // an object value. We don't change boolean or number into
 // strings though, which means InfinityDB will interpret the
 // number as a double! If you want to have the number underscore
 // quoted, use qLong(n) or qFloat(n) to generate '_5' or '_5.0f'.
+// Note that a Java Float is not the same as a JavaScript float.
 
 function qValue(o) {
 	if (o === null || o === undefined) {
 		return null;
 	} else if (typeof o === 'boolean' || typeof o === 'number') {
+		// default is always double! You will forget this.
+		// We can't tell whether to do new Float(o).toString()
+		// or new Long(o).toString() so you have to do that
+		// yourself from context..
 		return o;
 	} else {
 		return qKey(o);
@@ -305,7 +364,7 @@ function qValue(o) {
 
 // Unquote an underscore-quoted value
 // This works for keys or values
-// Be careful with numbers: InfinityDB long and float become JS numbers
+// Be careful with numbers: InfinityDB long and float become Long and Float
 function uq(o) {
 	if (typeof o !== 'string')
 		return o;
@@ -324,27 +383,54 @@ function uq(o) {
 		return true;
 	} else if (o === 'false') {
 		return false;
-	} else if (!isNaN(Number(o))) {
-		return parseFloat(o);
-	} else if (o.endsWith('f') && !isNaN(Number(o.slice(0, -1)))) {
-		return parseFloat(o.slice(0, -1));
-	} else if (isValidIsoDate(o)) {
-		return new Date(o);
-	} else if (EntityClass.isValidEntityClass(o)) {
-		return new EntityClass(o);
-	} else if (Attribute.isValidAttribute(o)) {
-		return new Attribute(o);
+	} else if (isDigit(o.charAt(0))) {
+		if (isValidIsoDate(o)) {
+			return new Date(o);
+		}
+		if (o.includes('.')) {
+			if (o.endsWith('f')) {
+				if (isNaN(o.slice(0, -1))) {
+					throw new Error("expected float but was " + o);
+				}
+				return new Float(Number.parseFloat(o.slice(0,-1)));
+			}
+			if (isNaN(o)) {
+				throw new Error("expected double but was " + o);
+			}
+			// Note we don't return a new Double() here!
+			return Number.parseFloat(o);
+//			return new Double(Number.parseFloat(o));
+		} else {
+			if (isNaN(o)) {
+				throw new Error("expected long but was " + o);
+			}
+			return new Long(Number.parseInt(o));
+		}
+	} else if (!o.includes('(')) {
+		if (EntityClass.isValidEntityClass(o)) {
+			return new EntityClass(o);
+		} else if (Attribute.isValidAttribute(o)) {
+			return new Attribute(o);
+		} else if (o.startsWith('[')) {
+			return new Index().parse(o);
+		} else {
+			throw new Error("expected entity class or attribute but was " + o);
+		}
 	} else if (o.startsWith('Bytes(')) {
 		return new Bytes().parse(o);
 	} else if (o.startsWith('ByteString(')) {
 		return new ByteString().parse(o);
 	} else if (o.startsWith('Chars(')) {
 		return new Chars().parse(o);
-	} else if (o.startsWith('Index(') || o.startsWith('[')) {
+	} else if (o.startsWith('Index(')) {
 		return new Index().parse(o);
 	} else {
 		throw new TypeError('cannot underscore-unquote value=' + o);
 	}
+}
+
+function isDigit(o) {
+	return typeof o === 'string' && '0123456789'.includes(o.charAt(0));
 }
 
 function isValidIsoDate(dateString) {
@@ -352,6 +438,17 @@ function isValidIsoDate(dateString) {
 	return isoDateRegex.test(dateString);
 }
 
+function qDouble(n) {
+	return '_' + new Double(n).toString();
+}
+
+function qLong(n) {
+	return '_' + new Long(n).toString();
+}
+
+function qFloat(n) {
+	return '_' + new Float(n).toString();
+}
 
 // Demonstrate some fundametal ways to work with the 12 data types.
 function exampleCreateObject() {
@@ -377,9 +474,8 @@ function exampleCreateObject() {
 		// on the InfinityDB side
 		_5: '_5',
 		[qLong(n)]: qLong(n),
-		// Use qFloat() to add the '_' and 'f' to force float on the InfinityDB side
-		_5f: '_5f',
-		'_5.0f': '_5.0f',
+		// Use qFloat() to add the '_' and '.' and 'f' to force float on the InfinityDB side
+		[qFloat(5.0)]: '_5.0f',
 		[qFloat(n)]: qFloat(n),
 		// Use the default double for numbers.
 		// You will forget that double is default, not long!!
