@@ -969,16 +969,6 @@ function indent(n, indention) {
 // There are quite a few such interfaces available to nodejs.
 // See test.html also for how it is done in a browser with AJAX i.e. XHTML.
 
-const axios = require('axios');
-let https;
-let http;
-try {
-	https = require('node:https');
-	http = require('node:http');
-} catch (err) {
-	console.error('https support is disabled!');
-}
-
 function main() {
 
 	// All of the code is really optional and is provided in the
@@ -1034,7 +1024,6 @@ function main() {
 	}
 
 	// Some test URIs. Constant ones can alternatively just be url-quoted by hand
-	// by prefixing them like ../_Query or ../_Documents/"pic0".
 	
 	// Read all of the queries as application/json. This is good exercize as all types are used.
 	const queryUri = idbEncodeUri(new IdbClass('Query'));
@@ -1057,7 +1046,19 @@ function main() {
 	const db = '/demo/writeable';
 	const uri = queryUri;
 	
+	const axios = require('axios');
+	let https;
+	let http;
+	try {
+		https = require('node:https');
+		http = require('node:http');
+	} catch (err) {
+		console.error('https support is disabled!');
+	}
+	
 	// Use the axios module for REST
+	
+	// A direct read, without passing  through a query.
 
 	console.log(protocol + '://' + host + ':' + port + db + uri);
 	try {
@@ -1076,7 +1077,83 @@ function main() {
 		console.log(e);
 	}
 
+	// A direct write. This requires write permission, with no query involved.
+	// Actually axios can do the text encoding too, but we show optional IdbBlobs.
+	// In fact axios handles JSON conveniently also. We write a single value,
+	// on a prefix ending in a date, so we see a 'log' of the writes.
+	
+	const encoder = new TextEncoder();
+	let encoded = encoder.encode('{ "hello from axios" : null }');
+	const blobToPost = new IdbBlob(encoded, 'application/json'); 
+	try {
+		axios.post(protocol + '://' + host + ':' + port + '/infinitydb/data' 
+				+ db + trashJavaScriptDemoUri + '/DemoPost/' 
+				+ new Date().toISOString() + '?action=write',
+					blobToPost.v, {
+				headers: { 'Content-Type' : blobToPost.contentType },
+				auth: { username: 'testUser', password: 'db' },
+//				responseType: 'arraybuffer' 
+			}
+		).then(function(response) {
+//			const blob = new IdbBlob(response.data, response.headers['content-type']);
+			console.log('to axios: ' + blobToPost.contentType + ' blobToPost length ' + blobToPost.v.length);
+		}).catch(function(error) {
+			console.error(error);
+		});
+	} catch (e) {
+		console.log(e);
+	}
+
+	// Use put to merge rather than post to copy. This does not
+	// clear the prefix first like post does, but merges new Items with pre-existing
+	// Items. There is also DELETE mode that clears the prefix.
+	
+	encoded = encoder.encode('{ "_DemoPost" : { "_' + new Date().toISOString() 
+		+ '" : { "hello from axios" : null }}}');
+	const blobToPut = new IdbBlob(encoded, 'application/json'); 
+	try {
+		axios.put(protocol + '://' + host + ':' + port + '/infinitydb/data' 
+				+ db + trashJavaScriptDemoUri + '?action=write',
+					blobToPut.v, {
+				headers: { 'Content-Type' : blobToPut.contentType },
+				auth: { username: 'testUser', password: 'db' },
+//				responseType: 'arraybuffer' 
+			}
+		).then(function(response) {
+//			const blob = new IdbBlob(response.data, response.headers['content-type']);
+			console.log('to axios: ' + blobToPut.contentType + ' blobToPut length ' + blobToPost.v.length);
+		}).catch(function(error) {
+			console.error(error);
+		});
+	} catch (e) {
+		console.log(e);
+	}
+	
+	// Execute a query that takes a name and returns a blob with an image.
+	// We do execute-get blob-query so that the response will be raw binary 
+	// like image/jpeg, rather than json.
+
+	const blobRequest = new IdbBlob(encoder.encode('{ "_name": "pic0" }'), 'application/json');
+	try {
+		axios.post(protocol + '://' + host + ':' + port + '/infinitydb/data' 
+				+ db + '/"examples"/"Display Image"?action=execute-get-blob-query',
+					blobRequest.v, {
+				headers: { 'Content-Type': 'application/json' },
+				auth: { username: 'testUser', password: 'db' },
+				responseType: 'arraybuffer'
+			}
+		).then(function(response) {
+			const blobResponse = new IdbBlob(response.data, response.headers['content-type']);
+			console.log('query axios: ' + blobResponse.contentType + ' queryResponse length ' + blobResponse.v.length);
+		}).catch(function(error) {
+			console.error(error);
+		});
+	} catch (e) {
+		console.log(e);
+	}
+
 	// Use the https module	for REST
+
 
 	const options = {
 		hostname: host,
@@ -1089,6 +1166,7 @@ function main() {
 	};
 
 	// Remember to switch this to correspond to protocol above
+	
 	const req = https.request(options, (res) => {
 //	const req = http.request(options, (res) => {
 		// Return raw data.
@@ -1108,6 +1186,7 @@ function main() {
 		console.error(error);
 	});
 	req.end();
+
 }
 
 main();
