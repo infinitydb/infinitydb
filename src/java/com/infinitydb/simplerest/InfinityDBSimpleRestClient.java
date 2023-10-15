@@ -30,16 +30,48 @@ import java.net.HttpURLConnection;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.net.URLEncoder;
+import java.security.SecureRandom;
+import java.security.cert.CertificateException;
+import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Date;
 import java.util.List;
 
+import javax.net.ssl.HostnameVerifier;
+import javax.net.ssl.HttpsURLConnection;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLSession;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.X509TrustManager;
+
+/**
+ * The helper code to access InfinityDB Server. This is all
+ * intended to make access easier, but it is possible to
+ * do it directly too.
+ * 
+ * See boilerbay,com.
+ */
 public class InfinityDBSimpleRestClient {
     // Not URL quoted, unlike the prefix.
     final String host;
     String userName;
     String passWord;
+    /*
+     *  For HTTPS sometimes there is no way to use SSL host name verification,
+     *  because the host has not registered a domain name and then
+     *  paid for a cert and installed it. See the InfinityDB Server documentation
+     *  at boilerbay.com for management, where this is explained.
+     *  Installing a certificate requires host root access. See
+     *  /data/infinitydb-home/key-store/certificate-tool.py.
+     *  
+     *  It is a bad idea to leave this true because then the security
+     *  may end up permanently disabled when code gets deployed. It is
+     *  also somewhat slow, because the keep-alive is interrupted.
+     *  
+     *  We disable both host name verification and certificate validation.
+     */
+    boolean isDisableSSLSecurity;
 
     public InfinityDBSimpleRestClient(String host) {
         if (host.endsWith("/"))
@@ -50,6 +82,10 @@ public class InfinityDBSimpleRestClient {
     public void setUserNameAndPassWord(String userName, String passWord) {
         this.userName = userName;
         this.passWord = passWord;
+    }
+    
+    public void setDisableSSLSecurity(boolean isDisableSSLSecurity) {
+        this.isDisableSSLSecurity = isDisableSSLSecurity;
     }
 
     /**
@@ -303,6 +339,9 @@ public class InfinityDBSimpleRestClient {
         URL url = new URL(urlString + queryString.queryString);
         HttpURLConnection urlConnection =
                 (HttpURLConnection)url.openConnection();
+        if (isDisableSSLSecurity && urlConnection instanceof HttpsURLConnection) {
+            disableSSLSecurity((HttpsURLConnection)urlConnection);
+        }
         urlConnection.setRequestMethod(method);
         // We always do input, but often it will be empty.
         urlConnection.setDoInput(true);
@@ -369,7 +408,7 @@ public class InfinityDBSimpleRestClient {
     /**
      * This can quote any URL path, even if it has components like new
      * IdbClass("Documentation"),"Basics",new IdbAttribute("description"), new
-     * Index(0) which becomes
+     * IdbIndex(0) which becomes
      * /demo/readonly/Documentation/%22Basics%22/description/%5B0%5D. It does
      * the components separately, then concatenates with / properly. Note there
      * is no underscore quoting as there is in JSON.
@@ -394,7 +433,30 @@ public class InfinityDBSimpleRestClient {
         }
         return sb.toString();
     }
-
+    
+    /**
+     * Don't use this in production!!!!
+     */
+    void disableSSLSecurity(HttpsURLConnection httpsURLConnection) throws IOException {
+        try {
+            httpsURLConnection.setHostnameVerifier(
+                    new HostnameVerifier() {
+                        @Override
+                        public boolean verify(String hostname,
+                                SSLSession session) {
+                            // Dangerous. Don't do this unless absolutely
+                            // necessary!
+                            return true;
+                        }
+                    });
+            SSLContext sslContext = SSLContext.getInstance("TLS");
+            sslContext.init(null, new TrustManager[] {new TrustAnythingTrustManager()}, 
+                    new SecureRandom());
+            httpsURLConnection.setSSLSocketFactory(sslContext.getSocketFactory());
+        } catch (Exception e) {
+            throw new IOException(e);
+        }
+    }
 }
 
 class Flatten {
@@ -410,5 +472,33 @@ class Flatten {
             list.add(o);
         }
         return list;
+    }
+}
+
+/**
+ * Don't use this in production!!!!
+ */
+class IgnoreHostNameVerifier implements HostnameVerifier {
+    @Override
+    public boolean verify(String hostname, SSLSession session) {
+        return true;
+    }
+}
+
+class TrustAnythingTrustManager implements X509TrustManager {
+
+    @Override
+    public void checkClientTrusted(X509Certificate[] arg0, String arg1)
+            throws CertificateException {
+    }
+
+    @Override
+    public void checkServerTrusted(X509Certificate[] arg0, String arg1)
+            throws CertificateException {
+    }
+
+    @Override
+    public X509Certificate[] getAcceptedIssuers() {
+        return new X509Certificate[0];
     }
 }
