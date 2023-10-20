@@ -26,15 +26,19 @@
 // However, instead of subclasses of Component, the JavaScript
 // primitive types number, string, boolean and Date are handled 
 // separately. JS number is always handled as a double (which you 
-// will forget.) So, we provide optional IdbFLoat, IdbLong, and 
-// IdbDouble to hold a number that will retain its InfinityDB meaning.
+// will forget.) So, we provide optional idb.FLoat, idb.Long, and 
+// idb.Double to hold a number that will retain its InfinityDB meaning.
 
 
 // All of this code is really optional and is provided in the
 // hope it will be useful. You can do everything by hand.
 // Parsing IdbBlobs is pretty useful.
 
-class IdbComponent {
+
+// Import this namespace
+export const idb = {}
+
+idb.Component = class IdbComponent {
 	
 	// v always has the value of any subclass.
 	
@@ -56,7 +60,7 @@ class IdbComponent {
 			|| typeof o === 'boolean' 
 			|| typeof o == 'string'
 			|| o instanceof Date 
-			|| o instanceof IdbComponent);
+			|| o instanceof idb.Component);
 	}
 }
 
@@ -64,7 +68,7 @@ class IdbComponent {
 // Numbers can either be primitives or subclasses of IdbNumber.
 // Inside the DB, this includes all but Metas. 
 
-class IdbPrimitive extends IdbComponent {
+idb.Primitive = class IdbPrimitive extends idb.Component {
 	constructor(v) {
 		super(v);
 	}
@@ -73,7 +77,7 @@ class IdbPrimitive extends IdbComponent {
 // The Metas are the non-primitive data types and delimit the 'data'
 // parts.
 
-class IdbMeta extends IdbComponent {
+idb.Meta = class IdbMeta extends idb.Component {
 	constructor(name) {
 		super(name);
 	}
@@ -85,10 +89,10 @@ class IdbMeta extends IdbComponent {
 
 // Instead of these, you can also write { _MyClass : 5; }
 
-class IdbClass extends IdbMeta {
+idb.Class = class IdbClass extends idb.Meta {
 	constructor(name) {
 		super(name);
-		if (!IdbClass.isValidName(name)) {
+		if (!idb.Class.isValidName(name)) {
 			throw new TypeError('IdbClasses must be UC, then letters, digits, dots, and underscores');
 		}
 	}
@@ -101,7 +105,7 @@ class IdbClass extends IdbMeta {
 
 // Instead of these, you can also write { _myAttribute : 5; }
 
-class IdbAttribute extends IdbMeta {
+idb.Attribute = class IdbAttribute extends idb.Meta {
 	constructor(name) {
 		super(name);
 		if (!IdbAttribute.isValidName(name)) {
@@ -118,7 +122,7 @@ class IdbAttribute extends IdbMeta {
 // Dates are handled separately even though they are InfinityDB
 // 'primitive' types.
 
-function idbIsValidIsoDate(dateString) {
+idb.isValidIsoDate = function(dateString) {
 	const isoDateRegex = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?)(Z|[-+]\d{2}:\d{2})?$/;
 	return isoDateRegex.test(dateString);
 }
@@ -129,10 +133,10 @@ function idbIsValidIsoDate(dateString) {
 // the token form of an Item, it might be:
 // "abc" [55] myAttribute. 
 // In a URL quoted by idbUriQuote it might be: 
-// ['abc',new IdbIndex(55),new IdbAttribute('myAttribute')],
+// ['abc',new idb.Index(55),new IdbAttribute('myAttribute')],
 // and in accessing a JS object, it would be x.abc[55]._myAttribute.
 
-class IdbIndex extends IdbPrimitive {
+idb.Index = class IdbIndex extends idb.Primitive {
 	constructor(index) {
 		super(index);
 		if (index == null) {
@@ -165,11 +169,11 @@ class IdbIndex extends IdbPrimitive {
 	}
 }
 // We insist on caps
-const idbHexChars = '0123456789ABCDEF';
+idb.hexChars = '0123456789ABCDEF';
 
 // No corresponding InfinityDB type: use Bytes and ByteString.
 
-class IdbByteArray extends IdbPrimitive {
+idb.ByteArray = class IdbByteArray extends idb.Primitive {
 
 	// protected access
 	constructor(bytes, name) {
@@ -188,7 +192,7 @@ class IdbByteArray extends IdbPrimitive {
 			if (!o.startsWith(this.name + '(') || !o.endsWith(')')) {
 		   		throw new TypeError('expected "' + this.name + '(...) " but was ' + o);
 			}
-			this.v = IdbByteArray.fromHexWithUnderscores(o.slice(this.name.length + 1, -1));
+			this.v = idb.ByteArray.fromHexWithUnderscores(o.slice(this.name.length + 1, -1));
 		}  else {
 	   		throw new TypeError('expected string: ' + o);
 		}
@@ -196,11 +200,11 @@ class IdbByteArray extends IdbPrimitive {
 	}
 
 	toString() {
-		return this.name + '(' + IdbByteArray.toHexWithUnderscores(this.v) + ')';
+		return this.name + '(' + idb.ByteArray.toHexWithUnderscores(this.v) + ')';
 	}
 	
 	toJSON() {
-		return '_' + this.name + '(' + IdbByteArray.toHexWithUnderscores(this.v) + ')';
+		return '_' + this.name + '(' + idb.ByteArray.toHexWithUnderscores(this.v) + ')';
 	}
 	
 	// Convert 'A6_99' to Uint8Array([0xa6,99]) for Bytes and ByteString
@@ -249,7 +253,7 @@ class IdbByteArray extends IdbPrimitive {
 	      throw new TypeError("Byte out of range for Uint8Array component: " + byte);
 	    }
 	
-	    const hexValue = idbHexChars[(byte >> 4) & 0xf] + idbHexChars[byte & 0xf];
+	    const hexValue = idb.hexChars[(byte >> 4) & 0xf] + idb.hexChars[byte & 0xf];
 	
 	    if (!isFirst) {
 	      s += '_';
@@ -265,18 +269,18 @@ class IdbByteArray extends IdbPrimitive {
 // The InfinityDB byte array data type. These are short, and must fit in
 // an Item when encoded, which is 1665 chars long.
 
-class IdbBytes extends IdbByteArray {
+idb.Bytes = class IdbBytes extends idb.ByteArray {
 	constructor(o) {
 		super(o, 'Bytes');
 	}
 }
 
 // The InfinityDB byte string data type.
-// Like Bytes(), but stored in InfinityDB so that it sorts like a string
+// Like idb.Bytes(), but stored in InfinityDB so that it sorts like a string
 // whereas Bytes() sorts according to its initial length code.
 // These are short, and must fit in an Item when encoded, which is 1665 chars long.
 
-class IdbByteString extends IdbByteArray {
+idb.ByteString = class IdbByteString extends idb.ByteArray {
 	constructor(o) {
 		super(o, 'ByteString');
 	}
@@ -286,7 +290,7 @@ class IdbByteString extends IdbByteArray {
 // Bytes, but rarely used.
 // These are short, and must fit in an Item when encoded, which is 1665 chars long.
 
-class IdbChars extends IdbPrimitive {
+idb.Chars = class IdbChars extends idb.Primitive {
 	constructor(s) {
 		super(s);
 		if (s == null) {
@@ -314,10 +318,10 @@ class IdbChars extends IdbPrimitive {
 	}
 }
 
-// There is corresponding type within the db: use IdbLong, IdbDouble, or IdbFloat
+// There is corresponding type within the db: use idb.Long, idb.Double, or idb.Float
 // subclasses.
 
-class IdbNumber extends IdbPrimitive {
+idb.Number = class IdbNumber extends idb.Primitive {
 	constructor(n) {
 		super(n);
 	}
@@ -327,7 +331,7 @@ class IdbNumber extends IdbPrimitive {
 	}
 }
 
-class IdbDouble extends IdbNumber {
+idb.Double = class IdbDouble extends idb.Number {
 	constructor(n) {
 		super(n);
 	}
@@ -341,7 +345,7 @@ class IdbDouble extends IdbNumber {
 	}
 }
 
-class IdbFloat extends IdbNumber {
+idb.Float = class IdbFloat extends idb.Number {
 	constructor(n) {
 		super(n);
 	}
@@ -355,7 +359,7 @@ class IdbFloat extends IdbNumber {
 	}
 }
 
-class IdbLong extends IdbNumber {
+idb.Long = class IdbLong extends idb.Number {
 	constructor(n) {
 		super(n);
 		if (!Number.isInteger(n)) {
@@ -376,45 +380,45 @@ class IdbLong extends IdbNumber {
 // placed in front except strings. A string that happens to already
 // have an underscore is quoted by 'stuffing in' another one.
 
-function idbKey(o) {
+idb.key = function(o) {
 	if (o === null || o === undefined) {
 		throw new TypeError('keys must not be null');
 	} 
 	if (typeof o === 'string') {
 		return o.charAt(0) !== '_' ? o : '_' + o;
 	} 
-	return '_' + idbToToken(o);
+	return '_' + idb.toToken(o);
 }
 
 // Quote something of the 12 data types to make it compatible with
 // an object value. We don't change number into
 // strings though, which means InfinityDB will interpret the
 // number as a double! If you want to have the number underscore
-// quoted, use IdbDoubleKey(), IdbLongKey(n) or IdbFloatKey(n) 
+// quoted, use idb.doubleKey(), idb.longKey(n) or idb.floatKey(n) 
 // to generate '_5.0' '_5' or '_5.0f' to correspond to the types
-// within InfinityDB. We also provide IdbFloat, IdbDouble, and
-// IdbLong classes that remember their
+// within InfinityDB. We also provide idb.Float, idb.Double, and
+// idb.Long classes that remember their
 // types, and you can get the contained number with myNumber.v.
 
-function idbValue(o) {
+idb.value = function(o) {
 	if (o === undefined) {
-		throw new TypeError('idbValue(undefined)');
+		throw new TypeError('idb.value(undefined)');
 	} else if (o === null || typeof o === 'boolean' || typeof o === 'number') {
 		return o;
 	} else {
-		return idbKey(o);
+		return idb.key(o);
 	}
 }
 
 // Unquote an underscore-quoted key or value.
 // Be careful with numbers: InfinityDB Long, Float and Double
-// become the corresponding classes IdbDouble, IdbLong or 
-// IdbFloat here , so you may have to use mylong.v. 
+// become the corresponding classes idb.Double, idb.Long or 
+// idb.Float here , so you may have to use mylong.v. 
 // Non-string JS primitives are just returned.
 
-function idbUnQuote(o) {
+idb.unQuote = function(o) {
 	if (o === undefined) {
-		throw new TypeError('idbUnQuote(undefined)');
+		throw new TypeError('idb.unQuote(undefined)');
 	} else if (typeof o !== 'string') {
 		return o;
 	} else if (o === '') {
@@ -425,26 +429,26 @@ function idbUnQuote(o) {
 		return o.slice(1);
 	}
 	// it is a string starting with a single underscore
-	return idbFromToken(o.slice(1));
+	return idb.fromToken(o.slice(1));
 }
 
 // The InfinityDB standard way to represent each data type as a string.
 
-function idbToToken(o) {
+idb.toToken = function(o) {
 	if (o === null || o === undefined) {
 		throw new TypeError('There is no null data type in InfinityDB');
 	} else if (typeof o === 'boolean') {
 		return o ? 'true' : 'false';
 	} else if (typeof o === 'number') {
-		return new IdbDouble(o).toString();
+		return new idb.Double(o).toString();
 	} else if (typeof o === 'string') {
 		return JSON.stringify(o);
 	} else if (o instanceof Date) {
 		return o.toISOString();
-	} else if (o instanceof IdbComponent) {
+	} else if (o instanceof idb.Component) {
 		return o.toString();
 	} else if (o instanceof Uint8Array) {
-		return new IdbBytes(o).toString();
+		return new idb.Bytes(o).toString();
 	} else {
 		throw new TypeError('Uknown data type: cannot create token form of : ' + o);
 	}
@@ -455,21 +459,21 @@ function idbToToken(o) {
 // String, Long, Boolean, Date etc. When Items are printed by
 // default they just come out as a sequence of these tokens.
 
-// Note that the three numeric types come out as instances of IdbLong, IdbDouble, and
-// IdbFloat. This way they preserve their types for later writing back.
+// Note that the three numeric types come out as instances of idb.Long, idb.Double, and
+// idb.Float. This way they preserve their types for later writing back.
 // You can get the value with myfloat.v. Sometimes you will find regular
 // JavaScript numbers, and these are interpreted as doubles, although
 // longs are more common in the database, so be careful.
 
-function idbFromToken(o) {	
+idb.fromToken = function(o) {	
 	if (o === 'null') {
 		return null;
 	} else if (o === 'true') {
 		return true;
 	} else if (o === 'false') {
 		return false;
-	} else if (IdbNumber.isDigit(o.charAt(0))) {
-		if (idbIsValidIsoDate(o)) {
+	} else if (idb.Number.isDigit(o.charAt(0))) {
+		if (idb.isValidIsoDate(o)) {
 			return new Date(o);
 		}
 		if (o.includes('.')) {
@@ -477,50 +481,50 @@ function idbFromToken(o) {
 				if (isNaN(o.slice(0, -1))) {
 					throw new TypeError("expected float but was " + o);
 				}
-				return new IdbFloat(Number.parseFloat(o.slice(0,-1)));
+				return new idb.Float(Number.parseFloat(o.slice(0,-1)));
 			}
 			if (isNaN(o)) {
 				throw new TypeError("expected double but was " + o);
 			}
-			return new IdbDouble(Number.parseFloat(o));
+			return new idb.Double(Number.parseFloat(o));
 		} else {
 			if (isNaN(o)) {
 				throw new TypeError("expected long but was " + o);
 			}
-			return new IdbLong(Number.parseInt(o));
+			return new idb.Long(Number.parseInt(o));
 		}
 	} else if (!o.includes('(')) {
 		if (o.startsWith('[')) {
-			return new IdbIndex().parse(o);
-		} else if (idbUpperCaseRegex.test(o.charAt(0))) {
-			return new IdbClass(o);
+			return new idb.Index().parse(o);
+		} else if (idb.upperCaseRegex.test(o.charAt(0))) {
+			return new idb.Class(o);
 		} else {
-			return new IdbAttribute(o);
+			return new idb.Attribute(o);
 		}
 	} else if (o.startsWith('Bytes(')) {
-		return new IdbBytes().parse(o);
+		return new idb.Bytes().parse(o);
 	} else if (o.startsWith('ByteString(')) {
-		return new IdbByteString().parse(o);
+		return new idb.ByteString().parse(o);
 	} else if (o.startsWith('Chars(')) {
-		return new IdbChars().parse(o);
+		return new idb.Chars().parse(o);
 	} else if (o.startsWith('Index(')) {
-		return new IdbIndex().parse(o);
+		return new idb.Index().parse(o);
 	} else {
 		throw new TypeError('cannot underscore-unquote value=' + o);
 	}
 }
-const idbUpperCaseRegex = /^[A-Z]$/;
+idb.upperCaseRegex = /^[A-Z]$/;
 
-function idbDoubleKey(n) {
-	return '_' + new IdbDouble(n);
+idb.doubleKey = function(n) {
+	return '_' + new idb.Double(n);
 }
 
-function idbFloatKey(n) {
-	return '_' + new IdbFloat(n);
+idb.floatKey = function(n) {
+	return '_' + new idb.Float(n);
 }
 
-function idbLongKey(n) {
-	return '_' + new IdbLong(n);
+idb.longKey = function(n) {
+	return '_' + new idb.Long(n);
 }
 
 // A blob is data plus a string contentType, which
@@ -533,7 +537,7 @@ function idbLongKey(n) {
 // JSON object of a particular structure for InfinityDB. This means we
 // can encode and transfer multiple arbitrarily long binary data chunks
 // inside JSON, along with other structure in one I/O. The data part is an aarray 
-// of IdbBytes() which are 1024 long except the last, which is 
+// of idb.Bytes() which are 1024 long except the last, which is 
 // only as long as needed. 
 
 // Here is the structure:
@@ -548,7 +552,7 @@ function idbLongKey(n) {
 
 // Not a subclass of IdbComponent.
 
-class IdbBlob {
+idb.Blob = class IdbBlob {
 	
 	constructor(data, contentType) {
 		this.v = data;
@@ -563,7 +567,7 @@ class IdbBlob {
 				if (contentType === 'application/json') {
 					this.v = JSON.parse(data);
 				} else if (!contentType.startsWith('text/')) {
-					throw new TypeError('new IdbBlob() string data requires a' +
+					throw new TypeError('new idb.Blob() string data requires a' +
 						' content type of "text/..." but was ' + contentType);
 				}
 			} else if (data instanceof Uint8Array) {
@@ -573,11 +577,11 @@ class IdbBlob {
 			} else if (typeof data === 'object') {
 				// The JSON is already -parsed for us.
 				if (contentType !== 'application/json') {
-					throw new TypeError('new IdbBlob() object data requires a' + 
+					throw new TypeError('new idb.Blob() object data requires a' + 
 						' content type of "application/json" but was ' + contentType);
 				}
 			} else {
-				throw new TypeError('new IdbBlob() object data of incompatible type: ' + idbPrintType(data));
+				throw new TypeError('new idb.Blob() object data of incompatible type: ' + idb.printType(data));
 			}
 		}
 	}
@@ -611,7 +615,7 @@ class IdbBlob {
 	
 	parseFromBlobStructure(o) {
 		if (o == null || typeof o !== 'object') {
-			throw new TypeError('Expected a blob structured object but was ' + idbPrintType(o));
+			throw new TypeError('Expected a blob structured object but was ' + idb.printType(o));
 		}
 		const blobInternals = o['_com.infinitydb.blob'];
 		if (blobInternals == null) {
@@ -619,17 +623,17 @@ class IdbBlob {
 		}
 		if (typeof blobInternals !== 'object') {
 			throw new TypeError('Expected a blob structured object but was' + 
-				' missing attribute com.infinitydb.blob and was ' + idbPrintType(blobInternals));
+				' missing attribute com.infinitydb.blob and was ' + idb.printType(blobInternals));
 		}
 		const contentType = blobInternals['_com.infinitydb.blob.mimeType'];
 		if (typeof contentType !== 'string') {
 			throw new TypeError('Expected a blob structured object but was missing' +
-				' attribute com.infinitydb.blob.mimeType: ' + idbPrintType(contentType));
+				' attribute com.infinitydb.blob.mimeType: ' + idb.printType(contentType));
 		}
 		const array = blobInternals['_com.infinitydb.blob.bytes'];
 		if (array == null || !Array.isArray(array)) {
 			throw new TypeError('Expected a blob structured object but was' +
-				' missing attribute com.infinitydb.blob.bytes ' + idbPrintType(array));
+				' missing attribute com.infinitydb.blob.bytes ' + idb.printType(array));
 		}
 		
 		var theFullData = null;
@@ -638,7 +642,7 @@ class IdbBlob {
 		} else {
 			const chunks = [];
 			for (const b of array)  {
-				const idbBytes = new IdbBytes().parse(b.slice(1));
+				const idbBytes = new idb.Bytes().parse(b.slice(1));
 				chunks.push(idbBytes.v);
 			} 
 			theFullData = Buffer.concat(chunks);
@@ -662,7 +666,7 @@ class IdbBlob {
 		const bytesArray = [];
 		for (let i = 0; i < this.v.length; i += 1024) {
 			const chunk = this.v.slice(i, i+ 1024);
-			bytesArray.push(new IdbBytes(chunk).toJSON());
+			bytesArray.push(new idb.Bytes(chunk).toJSON());
 		}
 		const structure = { 
 			'_com.infinitydb.blob': {
@@ -677,7 +681,7 @@ class IdbBlob {
 		if (o == null || typeof o !== 'object') {
 			return false;
 		}
-		if (o instanceof IdbBlob) {
+		if (o instanceof idb.Blob) {
 			return true;
 		}
 		const blobInternals = o['_com.infinitydb.blob'];
@@ -708,32 +712,32 @@ class IdbBlob {
 			return JSON.stringify(this.v);
 		} else {
 			throw new TypeError('IdbBlob contains incompatible data of type ' +
-				idbPrintType(this.v) + ' content type is ' + this.contentType);
+				idb.printType(this.v) + ' content type is ' + this.contentType);
 		}
 	}
 	
 	// From an object or array, recursively construct a new one but
-	// with all possible IdbBlobs instead of their object structures.
+	// with all possible idb.Blobs instead of their object structures.
 	// Then you can get their Uint8Array forms directly, such as for
 	// images.
 	
-	static idbConvertAllContainedBlobStructures(o) {
+	static convertAllContainedBlobStructures(o) {
 		if (o === undefined) {
 			throw new TypeError('Undefined object');
 		}
-		if (o === null || typeof o !== 'object' || o instanceof IdbComponent) {
+		if (o === null || typeof o !== 'object' || o instanceof idb.Component) {
 			return o;
 		}
 		if (Array.isArray(o)) {
 			const converted = [];
 			for (const e of o) {
-				converted.push(IdbBlob.idbConvertAllContainedBlobStructures(e));
+				converted.push(idb.Blob.convertAllContainedBlobStructures(e));
 			}
 			return converted;
 		}
 		const isIdbBlob = o['_com.infinitydb.blob'] != null; 
 		if (isIdbBlob) {
-			const idbBlob = new IdbBlob().parseFromBlobStructure(o);
+			const idbBlob = new idb.Blob().parseFromBlobStructure(o);
 //			console.log('IdbBlob ' + idbBlob);
 			console.log('IdbBlob len ' + idbBlob.v.length);
 			return idbBlob;
@@ -743,7 +747,7 @@ class IdbBlob {
 			if (!o.hasOwnProperty(k))
 				continue;
 			const v = o[k];
-			converted[k] = IdbBlob.idbConvertAllContainedBlobStructures(v);
+			converted[k] = idb.Blob.convertAllContainedBlobStructures(v);
 		}
 		return converted;
 	}
@@ -756,30 +760,30 @@ class IdbBlob {
 //   * a string, which gets string quoted like "mystring"
 //   * a number, which is interpreted as a double
 //   * a boolean which turns into true or false, or
-//   * a subclass of IdbComponent, which will be encoded properly.
+//   * a subclass of idb.Component, which will be encoded properly.
 // You can do this by hand without much trouble. 
 
-function idbEncodeUri(...components) {
+idb.encodeUri = function(...components) {
     let s = '';
     // Flatten
     const componentsFlat = [].concat(components);
     for (const component of componentsFlat) {
-       	s += '/' +  idbEncodeUriComponent(component);
+       	s += '/' +  idb.encodeUriComponent(component);
     }
     return s;
 }
 
 // Using a JS number defaults to double, which may not be obvious.
-// You can use the IdbLong, IdbDouble, and IdbFloat classes for clarity.
+// You can use the idb.Long, idb.Double, and idb.Float classes for clarity.
 // The main point is to prevent uri-quoting the slashes. You can 
 // do this by hand in many cases.
 
-function idbEncodeUriComponent(s) {
+idb.encodeUriComponent = function(s) {
 	if (s === null || s === undefined) {
 		throw new TypeError("Cannot encode a uri of null");
 	} else if (typeof s === 'string') {
         s = JSON.stringify(s);
-    } else if (typeof s == 'number' || typeof s == 'boolean' || s instanceof IdbComponent) {
+    } else if (typeof s == 'number' || typeof s == 'boolean' || s instanceof idb.Component) {
 		s = s.toString();
 	}
 	// The built-in function
@@ -787,7 +791,7 @@ function idbEncodeUriComponent(s) {
 }
 
 // Get a string representing the type of any value
-function idbPrintType(o) {
+idb.printType = function(o) {
 	if (o === null) {
 		return 'null';
 	} else if (o === undefined) {
@@ -803,18 +807,91 @@ function idbPrintType(o) {
 	}
 }
 
+function indent(n, indention) {
+	if (indention == null) {
+		indention = '    ';
+	}
+	var s = '';
+	for (var i = 0; i < n; i++) {
+		s += indention;
+	}
+	return s;
+}
+
+// This demonstrates recursing over a JSON tree in order to print
+// a JSON tree. Not very useful, but it can print also in the
+// InfinityDB extended JSON form, where we minimize quotes.
+// It shows using the unquoter idbUnQuote() to get the key out,
+// and the quoter idb.key() to re-create it ready for use as a key.
+// Also, if we have already run idbConvertAllContainedBlobs, then
+// the tree contains Uint8Arrays, and we want to avoid them
+// printing literally - they convert back to the original form.
+
+// indent is a string to concatenate depth times
+
+idb.printAsJSON = function(o, depth, isExtended, indentString) {
+	if (o == null) {
+		return 'null';
+	}
+	if (depth == null) {
+		depth = 0;
+	}
+	if (isExtended == null) {
+		isExtended = false;
+	}
+	var s = '';
+	var isFirst = true;
+	if (idb.Component.isComponent(o)) {
+		return isExtended ? idb.toToken(idb.unQuote(o)) : JSON.stringify(o);
+	} else if (o instanceof idb.Blob) {
+		return idb.printAsJSON(o.toBlobStructure(), depth, isExtended, indentString);
+	} else if (Array.isArray(o)) {
+		s += '[\r\n';
+		for (var e of o) {
+			if (!isFirst) {
+				s += ',\r\n';
+			}
+			isFirst = false;
+			s += indent(depth + 1, indentString);
+			if (e !== null) {
+				s += idb.printAsJSON(e, depth  + 1, isExtended, indentString);
+			} else {
+				s += 'null';
+			}
+		}
+		s += '\r\n' + indent(depth) + ']';
+	} else if (typeof o == 'object') {
+		s += '{\r\n';
+		for (var k in o) {
+			if (!isFirst) {
+				s += ',\r\n';
+			}
+			isFirst = false;
+			s += indent(depth + 1, indentString);
+			// extract from the form in the input JSON
+			s += (isExtended ? idb.toToken(idb.unQuote(k)) : JSON.stringify(k)) + ': ';
+			const v = o[k];
+			s += idb.printAsJSON(v, depth  + 1, isExtended, indentString);
+		}
+		s +=  '\r\n' + indent(depth, indentString) + '}';
+	} else {
+		
+	}
+	return s;
+}
+
 /*
 Preprocess an object to use as the input data of a pattern query.
 */
-function unflatten_query_data(obj) {
+idb.unflattenQueryData = function(obj) {
 	if (obj == null) return null;
 	for (let [k,v] of Object.entries(obj)) {
 		if (v instanceof Array) {
-			obj[k] = unflatten_list(v);
+			obj[k] = idb.unflattenList(v);
 		}
 		else {
 			let new_obj = {};
-			new_obj[idbKey(v)] = null;
+			new_obj[idb.key(v)] = null;
 			obj[k] = new_obj;
 		}
 
@@ -828,13 +905,13 @@ function unflatten_query_data(obj) {
 in a pattern query.
 input: [x1, x2, x3...]  output: {x1: {x2: {x3: ....null}}}
 */
-function unflatten_list(l) {
+idb.unflattenList = function(l) {
 	if (l.length == 0) return null;
 	let obj = {};
 	let prefix = l[0];
 	let suffix = l.slice(1);
 
-	obj[idbKey(prefix)] = unflatten_list(suffix);
+	obj[idb.key(prefix)] = idb.unflattenList(suffix);
 	return obj;
 }
 
@@ -847,10 +924,10 @@ function unflatten_list(l) {
  each of which should trigger a query match. 
 */
 
-function unflatten_from_lists(l) {
+idb.unflattenFromLists = function(l) {
 	if (!(l instanceof Array)) {
 		let result = {};
-		result[idbToToken(l)] = null;
+		result[idb.toToken(l)] = null;
 		return result;
 	}
 	if (l.length == 0) return null;
@@ -863,18 +940,18 @@ function unflatten_from_lists(l) {
 			let suffix = x.slice(1);
 
 
-			prefix = idbKey(prefix);
+			prefix = idb.key(prefix);
 			if (!(prefix in obj) || obj[prefix] == null) obj[prefix] = [];
 			obj[prefix].push(suffix);
 		}
 		else {
-			obj[idbKey(x)] = null;
+			obj[idb.key(x)] = null;
 		}
 	}
 
 	for (let key of Object.keys(obj)) {
 		if (obj[key] instanceof Array) {
-			obj[key] = unflatten_from_lists(obj[key]);
+			obj[key] = idb.unflattenFromLists(obj[key]);
 		}
 	}
 	if (Object.keys(obj).length == 0) return null;
@@ -886,20 +963,20 @@ function unflatten_from_lists(l) {
 unflatten_from_lists(). Useful for unpacking the output of a pattern query that returns
 multiple lists.
 */
-function flatten_to_lists(obj) {
+idb.flattenToLists = function(obj) {
 	if (obj == null) return [];
 	if (typeof obj != "object") {
-		return [idbUnQuote(obj)];
+		return [idb.unQuote(obj)];
 	}
 	let l = [];
 	for (let [k, v] of Object.entries(obj)) {
-		k = idbUnQuote(k);
+		k = idb.unQuote(k);
 		if (v == null) {
 			l.push(k);
 			continue;
 		}
 
-		let suffixes = flatten_to_lists(v);
+		let suffixes = idb.flattenToLists(v);
 		for (let suffix of suffixes) {
 			l.push([k].concat(suffix));
 		}
@@ -910,7 +987,7 @@ function flatten_to_lists(obj) {
 /* The interface for running queries in browser-based JavaScript. Example:
 server = IdbAccessor("https://infinitydb.com:37411/infinitydb/data", "demo/writable", "myUser", "myPassword");
 */
-class IdbAccessor {
+idb.Accessor = class IdbAccessor {
 	constructor(server_url, db, username, password) {
 		this.server_url = server_url
 		this.db = db
@@ -922,7 +999,7 @@ class IdbAccessor {
 	}
 
 	async _do_query(prefix, data, is_get_blob_query=false) {
-		prefix = prefix.map(idbEncodeUriComponent).join("/")
+		prefix = prefix.map(idb.encodeUriComponent).join("/")
 		let query_url = new URL(this.db_url + '/' + prefix)
 
 		let action = "execute-query";
@@ -967,14 +1044,14 @@ class IdbAccessor {
 	/* Execute a pattern query that returns a blob rather than a JSON dictionary.
 	*/
 	async execute_get_blob_query(prefix, data=null) {
-		data = unflatten_query_data(data);
+		data = idb.unflattenQueryData(data);
 		return this._do_query(prefix, data, true);
 	}
 
 
 	// Execute a normal pattern query that returns a JSON dictionary.
 	async execute_query(prefix, data=null) {
-		data = unflatten_query_data(data);
+		data = idb.unflattenQueryData(data);
 		return this._do_query(prefix, data, false);
 	}
 
@@ -991,10 +1068,3 @@ class IdbAccessor {
 	}
 
 }
-
-export {IdbAccessor, flatten_to_lists, unflatten_from_lists, unflatten_query_data, unflatten_list,
-	idbKey, idbValue, IdbChars, IdbDouble, IdbBytes, 
-	IdbComponent, IdbClass, IdbBlob, IdbAttribute, idbLongKey,
-	idbFloatKey, IdbByteString, IdbIndex, IdbLong, IdbFloat,
-	idbUnQuote, idbPrintType, idbToToken, idbFromToken, idbEncodeUri
-};
