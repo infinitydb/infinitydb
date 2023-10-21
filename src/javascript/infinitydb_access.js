@@ -34,8 +34,15 @@
 // hope it will be useful. You can do everything by hand.
 // Parsing IdbBlobs is pretty useful.
 
+let axios;
+if (typeof window == "undefined") {
+	// If running in nodeJS, use axios instead of the built-in
+	// fetch() API. There is a fetch() implementation in nodeJS, but 
+	// it doesn't seem to send the JSON correctly. 
+	axios = await import('axios').then((x) => x.default);
+}
 
-// Import this namespace
+// Import this namespace in client javascript
 export const idb = {}
 
 idb.Component = class IdbComponent {
@@ -885,18 +892,19 @@ Preprocess an object to use as the input data of a pattern query.
 */
 idb.unflattenQueryData = function(obj) {
 	if (obj == null) return null;
+	let unflattened_obj = {};
 	for (let [k,v] of Object.entries(obj)) {
 		if (v instanceof Array) {
-			obj[k] = idb.unflattenList(v);
+			unflattened_obj[k] = idb.unflattenList(v);
 		}
 		else {
-			let new_obj = {};
-			new_obj[idb.key(v)] = null;
-			obj[k] = new_obj;
+			let leaf_obj = {};
+			leaf_obj[idb.key(v)] = null;
+			unflattened_obj[k] = leaf_obj;
 		}
 
 	}
-	return obj;
+	return unflattened_obj;
 
 }
 
@@ -997,74 +1005,174 @@ idb.Accessor = class IdbAccessor {
 
 		this.auth = btoa(this.username + ":" + this.password)
 	}
-
-	async _do_query(prefix, data, is_get_blob_query=false) {
-		prefix = prefix.map(idb.encodeUriComponent).join("/")
-		let query_url = new URL(this.db_url + '/' + prefix)
-
-		let action = "execute-query";
-		if (is_get_blob_query) action = "execute-get-blob-query";
-		query_url.searchParams.append("action", action);
-
-
-		const request = new Request(query_url,
-			{
-				headers: {
-					"Authorization": "Basic" + this.auth,
-					"Content-Type": "application/json"
-				},
-				method: "POST",
-				body: JSON.stringify(data)
-
-			}
-		);
-		let result = null;
-		let content_type = null;
+	async _do_request_axios(query_url, method, data, request_content_type, blob_response) {
 		let success = false;
+		let result = null;
+		let response_content_type = null;
+		let response;
+		const options = {
+			url: query_url,
+			method: method,
+			auth: {username: this.username, password: this.password},
+			data: data,
+			headers: {
+				'Content-Type': request_content_type
+			}
+		};
+		if (blob_response) {
+			options["responseType"] = "arraybuffer";
+		}
+
 		try {
-			let response = await fetch(request);
-			if (response.status == 200) {
-				success = true;
-				content_type = response.headers.get("Content-Type");
-				if (is_get_blob_query) {
-					result = await response.blob();
+			response = await axios.request(options);
+			response_content_type = response.headers.get("Content-Type");
+			success = (response.status == 200);
+			if (success) {
+				if (blob_response) {
+					result = new idb.Blob(response.data, response_content_type);
 				}
 				else {
+					result = response.data;
+				}
+			}
+			else {
+				console.error("Axios request to InfinityDB server failed with error: " + response.statusText);
+			}
+
+		}
+		catch (error) {
+			console.error("Error occurred during Axios request to infinityDB Server");
+			throw(error);
+		}
+		return [success, result, response_content_type];
+	}
+
+	async _do_request_fetch(query_url, method, data, request_content_type, blob_response) {
+		let success = false;
+		let result = null;
+		let response_content_type = null;
+		const options = {
+			headers: {
+				"Authorization": "Basic" + this.auth,
+				"Content-Type": request_content_type
+			},
+			method: method
+		}
+		if (data != null) {
+			options['body'] = data;
+		}
+		let request = new Request(query_url, options);
+		try {
+			let response = await fetch(request);
+			success = (response.status == 200);
+			if (success) {
+				response_content_type = response.headers.get("Content-Type");
+				if (blob_response) {
+					let blob = await response.blob();
+					let data = await blob.arrayBuffer();
+					result = new idb.Blob(data, response_content_type);
+
+				}
+				else if (response_content_type == "application/json") {
 					result = await response.json();
 				}
 			}
+			else {
+				console.error("Fetch request failed with error: " + response.statusText);
+			}
+
 		}
-		catch(error) {
+		catch (error) {
 			console.error("Error occurred while connecting to InfinityDB server " + this.server_url);
+			throw(error);
 		}
+		return [success, result, response_content_type];
+	}
+	
+	_do_request(query_url, method, data=null, request_content_type="application/json", blob_response=false) {
+		if (typeof window == "undefined") {
+			return this._do_request_axios(query_url, method, data, request_content_type, blob_response);
+		}
+		else {
+			return this._do_request_fetch(query_url, method, data, request_content_type, blob_response);
+		}
+	}
+
+	make_query_url(prefix) {
+		prefix = prefix.map(idb.encodeUriComponent).join("/");
+		let query_url = new URL(this.db_url + '/' + prefix);
+		return query_url;
+	}
+
+	async execute_query(prefix, data) {
+		let query_url = this.make_query_url(prefix);
+		query_url.searchParams.append("action", "execute-query");
+
+		data = idb.unflattenQueryData(data);
+		data = JSON.stringify(data);
+
+		let [success, result, content_type] = await this._do_request(query_url, "POST", data, "application/json", false);
+		
+		return [success, result, content_type];
+	}
+	
+	// Directly get a blob using its URI in the database. For example 
+	// get_blob([new idb.Class("Pictures"), "pic0"])
+	async get_blob(prefix) {
+		let query_url = this.make_query_url(prefix);
+
+		let [success, result, content_type] = await this._do_request(query_url, "GET", null, null, true);
 		return [success, result, content_type];
 
 	}
 
+	async put_json(prefix, obj) {
+		let query_url = this.make_query_url(prefix);
+		query_url.searchParams.append("action", "write");
+		let data = JSON.stringify(obj);
+
+		let [success, result, content_type] = await this._do_request(query_url, "POST", data, "application/json", false);
+		return success;
+	}
+
+	async get_json(prefix) {
+		let query_url = this.make_query_url(prefix);
+
+		let [success, result, content_type] = await this._do_request(query_url, "GET", null, null, false);
+		return [success, result, content_type];
+
+	}
+
+	async put_blob(prefix, blob) {
+		let query_url = this.make_query_url(prefix);
+		query_url.searchParams.append("action", "put-blob");
+
+		let [success, result, content_type] = await this._do_request(query_url, "POST", blob.v, blob.contentType, false);
+		return success;
+	}
+
+	async delete(prefix) {
+		let query_url = this.make_query_url(prefix);
+		query_url.searchParams.append("action", "write");
+
+		let [success, result, content_type] = await this._do_request(query_url, "DELETE", null, "application/json", false);
+		return success;
+	}
+
 	/* Execute a pattern query that returns a blob rather than a JSON dictionary.
 	*/
-	async execute_get_blob_query(prefix, data=null) {
+	async execute_get_blob_query(prefix, data) {
+		let query_url = this.make_query_url(prefix);
+		query_url.searchParams.append("action", "execute-get-blob-query");
 		data = idb.unflattenQueryData(data);
-		return this._do_query(prefix, data, true);
+		data = JSON.stringify(data);
+		return this._do_request(query_url, "POST", data, "application/json", true);
 	}
 
 
-	// Execute a normal pattern query that returns a JSON dictionary.
-	async execute_query(prefix, data=null) {
-		data = idb.unflattenQueryData(data);
-		return this._do_query(prefix, data, false);
-	}
-
-	head() {
-		const request = new Request(this.db_url,
-			{
-				headers: {
-					"Authorization": "Basic " + this.auth
-				},
-				method: "HEAD"
-			});
-
-		return fetch(request)
+	async head() {
+		let [success, result, content_type] = await this._do_request(this.db_url, "HEAD");
+		return success;
 	}
 
 }
