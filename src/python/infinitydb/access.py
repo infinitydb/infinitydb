@@ -46,7 +46,7 @@ from requests.exceptions import ConnectionError
 
 
 __author__ = 'Roger L Deran'
-__version__ = '1.2'
+__version__ = '1.3'
 __all__ = ['InfinityDBAccessor',
            'InfinityDBError',
            'escape_uri_components',
@@ -57,7 +57,11 @@ __all__ = ['InfinityDBAccessor',
            'to_json_extended',
            'Attribute',
            'EntityClass',
+           'Bytes',
+           'ByteString',
+           'Chars',
            'Index',
+           'Float',
            'flatten_to_tuples',
            'unflatten_from_tuples',
            'flatten_lists_to_indexes',
@@ -113,18 +117,18 @@ an 'inversion' [EInverse, v, aInverse, e]. EntityClasses
 start with an uppercase letter, Attributes with lowercase.
 """
 
-
 # TODO it would be good to be able to compare magnitudes of different
 # component types, including EntityClass, Attribute, and Index,
 # as well as the primitive component types since that is possible
 # in InfinityDB as components of Items. In fact all component types
 # can be compared, and there is a fixed order of the types,
-# with Index last.
+# with EntityClass first and Index last.
 #
 # Also, EC and Att identified using ids should sort differently
 # from the named ones, but we just use the string in any case,
 # and that comparison will be slower, but the
 # id-based ones are rare now.
+
 class EntityClass:
     """ EntityClass corresponds to the InfinityDB EntityClass 
     component type.
@@ -264,8 +268,241 @@ class Attribute:
                 "both InfinityDB Attributes")
         return self.s >= other.s
 
+class Bytes:
+    """ 
+    Bytes corresponds to the InfinityDB byte array component type.
+    It is limited to 1024 bytes. To encode a blob, use multiple
+    Bytes components in a list like this:
+    com.infinitydb.blob {
+        com.infinitydb.blob.bytes [Bytes(0A_0B_0C..), Bytes(0D_0E_0F..), Bytes(10_11_12)]
+        com.infinitydb.blob.mimeType "image/png"
+    }
+    """
 
-class Index:
+    def __init__(self, value):
+        if isinstance(value, bytes):
+            self.b = value
+        elif isinstance(value, str):
+            self.b = value.encode('utf-8')
+        elif isinstance(value, list):
+            self.b = bytes(value)
+        else:
+            raise ValueError("A Bytes component type "
+                             "requires a bytes array, list or a string")
+
+    # Convert a Bytes(..) token to bytes. It contains an underline-separated
+    # sequence of pairs of hex digits, the underlines are between the bytes
+    # with no underlines at the start or end.
+    # The byte array is the sequence of bytes represented by the hex digits.
+    # For example, the string "Bytes(0A_0B_0C)" represents a byte array
+    # with the bytes 0x0A, 0x0B, and 0x0C.
+    @staticmethod
+    def token_to_bytes(s):
+        if not s.startswith('Bytes(') or not s.endswith(')'):
+            raise ValueError("A Bytes component type "
+                             "must start with Bytes( and end with )")
+        return Bytes.hex_to_bytes(s[6:-1])
+
+    # return 'Bytes(0A_0B_0C..)'
+    def __str__(self):
+        return 'Bytes(' + Bytes.bytes_to_hex(self.b) + ')'
+    
+    def __repr__(self):
+        return 'Bytes(' + Bytes.bytes_to_hex(self.b) + ')'
+    
+    @staticmethod
+    def hex_to_bytes(s):
+        s = s.replace('_', '')
+        if len(s) % 2 != 0:
+            raise ValueError("A Bytes or ByteString component type "
+                             "with uneven number of hex digits")
+        return bytes.fromhex(s)
+    @staticmethod
+    def bytes_to_hex(b):
+        # Put the _ in s2. this should be faster
+        # than using formatting.
+        # The string concatenation is the slow part
+        s = b.hex().upper()
+        s2 = ''
+        for i in range(0, len(s), 2):
+            if i > 0:
+                s2 += '_'
+            s2 += s[i:i+2]
+        return s2
+        
+    def __hash__(self):
+        return hash(self.b)
+    
+    def __eq__(self, other):
+        return isinstance(other, Bytes) and self.b == other.b   
+
+    def __ne__(self, other):
+        return not isinstance(other, Bytes) or self.b != other.b        
+
+    def __lt__(self, other):
+        if not isinstance(other, Bytes):    
+            raise TypeError("Unorderable types: not "
+                "both InfinityDB Bytes")
+        return self.b < other.b if len(self.b) == len(other.b) else len(self.b) < len(other.b)
+
+    def __gt__(self, other):
+        if not isinstance(other, Bytes):    
+            raise TypeError("Unorderable types: not "
+                "both InfinityDB Bytes")
+        return self.b > other.b if len(self.b) == len(other.b) else len(self.b) > len(other.b)
+
+    def __le__(self, other):
+        if not isinstance(other, Bytes):    
+            raise TypeError("Unorderable types: not "
+                "both InfinityDB Bytes")
+        return self.b <= other.b if len(self.b) == len(other.b) else len(self.b) <= len(other.b)
+
+    def __ge__(self, other):
+        if not isinstance(other, Bytes):    
+            raise TypeError("Unorderable types: not "
+                "both InfinityDB Bytes")
+        return self.b >= other.b if len(self.b) == len(other.b) else len(self.b) >= len(other.b)
+
+class ByteString(Bytes):
+    """ 
+    ByteString corresponds to the InfinityDB byte string component type.
+    It is limited to 1024 bytes. It sorts like a string, unlike Bytes.
+    """
+
+    def __init__(self, value):
+        if isinstance(value, bytes):
+            self.b = value
+        elif isinstance(value, str):
+            self.b = value.encode('utf-8')
+        elif isinstance(value, list):
+            self.b = bytes(value)
+        else:
+            raise ValueError("A ByteString component type "
+                             "requires a bytes array, list or a string")
+
+    # Convert a ByteString(..) token to bytes. It contains an underline-separated
+    # sequence of pairs of hex digits, the underlines are between the bytes
+    # with no underlines at the start or end.
+    # The byte array is the sequence of bytes represented by the hex digits.
+    # For example, the string "Bytes(0A_0B_0C)" represents a byte array
+    # with the bytes 0x0A, 0x0B, and 0x0C.
+    @staticmethod
+    def token_to_bytes(s):
+        if not s.startswith('ByteString(') or not s.endswith(')'):
+            raise ValueError("A ByteString component type "
+                             "must start with ByteString( and end with )")
+        return Bytes.hex_to_bytes(s[11:-1])
+
+    # return 'ByteString(0A_0B_0C..)'
+    def __str__(self):
+        return 'ByteString(' + Bytes.bytes_to_hex(self.b) + ')'
+    
+    def __repr__(self):
+        return 'ByteString(' + Bytes.bytes_to_hex(self.b) + ')'
+
+    def __hash__(self):
+        return hash(self.b)
+    
+    def __eq__(self, other):
+        return isinstance(other, ByteString) and self.b == other.b   
+
+    def __ne__(self, other):
+        return not isinstance(other, ByteString) or self.b != other.b        
+
+    # bytes compare like strings
+    def __lt__(self, other):
+        if not isinstance(other, ByteString):    
+            raise TypeError("Unorderable types: not "
+                "both InfinityDB ByteString")    
+        return self.b < other.b
+
+    def __gt__(self, other):
+        if not isinstance(other, ByteString):    
+            raise TypeError("Unorderable types: not "
+                "both InfinityDB ByteString")
+        return self.b > other.b
+
+    def __le__(self, other):
+        if not isinstance(other, ByteString):    
+            raise TypeError("Unorderable types: not "
+                "both InfinityDB ByteString")
+        return self.b <= other.b
+
+    def __ge__(self, other):
+        if not isinstance(other, ByteString):    
+            raise TypeError("Unorderable types: not "
+                "both InfinityDB ByteString")
+        return self.b >= other.b
+        
+class Chars:
+    """ 
+    Chars corresponds to the InfinityDB char array component type.
+    It is limited to 1024 chars. It sorts like a Bytes. Sometimes a
+    CLOB will be a list of Chars in an ItemSpace but that is rare now.
+    """
+    def __init__(self, value):
+        # it is ambiguous whether a string is a token or a string
+        if isinstance(value, bytes):
+            self.s = str(value, 'utf-8')
+        elif isinstance(value, str):
+            self.s = value
+        else:
+            raise ValueError("A Chars component type "
+                             "requires a bytes array or a string containing a token")
+
+    # Convert a Chars(..) token to a string.
+    @staticmethod
+    def token_to_chars(s):
+        if not s.startswith('Chars(') or not s.endswith(')'):
+            raise ValueError("A Chars component type "
+                             "must start with Chars( and end with )")
+        after = skip_json_string(s, start=6)
+        if after != len(s) - 1:
+                raise TypeError("InfinityDB Chars() "
+                                "does not contain a valid quoted string: '" + s + "'")
+        s = s[6:after]
+        return json.loads(s)
+
+    def __str__(self):
+        return 'Chars(' + json.dumps(self.s) + ')'
+        
+    def __repr__(self):
+        return 'Chars(' + json.dumps(self.s) + ')'
+
+    def __hash__(self):
+        return hash(self.s)
+    
+    def __eq__(self, other):
+        return isinstance(other, Chars) and self.s == other.s
+
+    def __ne__(self, other):
+        return not isinstance(other, Chars) or self.s != other.s
+
+    def __lt__(self, other):
+        if not isinstance(other, Chars):    
+            raise TypeError("Unorderable types: not "
+                "both InfinityDB Chars")
+        return self.s < other.s
+
+    def __gt__(self, other):
+        if not isinstance(other, Chars):    
+            raise TypeError("Unorderable types: not "
+                "both InfinityDB Chars")
+        return self.s > other.s
+
+    def __le__(self, other):
+        if not isinstance(other, Chars):
+            raise TypeError("Unorderable types: not "
+                "both InfinityDB Chars")
+        return self.s <= other.s
+
+    def __ge__(self, other):
+        if not isinstance(other, Chars):
+            raise TypeError("Unorderable types: not "
+                "both InfinityDB Chars")
+        return self.s >= other.s
+
+class Index(int):
     """ Index corresponds to the InfinityDB Index component type.
     
     Transferring data as JSON to and from the InfinityDB REST
@@ -284,58 +521,18 @@ class Index:
     The dicts containing Index component keys will automatically be
     encoded as Python lists, however, transparently.
     """
-
-    def __init__(self, index):
-        if isinstance(index, int):
-            self.index = index
-        else:
-            raise ValueError("An InfinityDB Index "
-                             "component requires an int")
-
-    def __str__(self):
-        return '[' + str(self.index) + ']'
-
     def __repr__(self):
-        return '[' + str(self.index) + ']'
+        return f'[{super().__repr__()}]'
 
-    def __hash__(self):
-        return hash(self.index)
-
-    def __eq__(self, other):
-        return isinstance(other, Index) and self.index == other.index
-
-    def __ne__(self, other):
-        return (not isinstance(other, Index) or
-                self.index != other.index)
-
-    def __lt__(self, other):
-        if not isinstance(other, Index):
-            raise TypeError("Unorderable types: not "
-                "both InfinityDB Indexes")
-        return self.index < other.index
-
-    def __gt__(self, other):
-        if not isinstance(other, Index):
-            raise TypeError("Unorderable types: not "
-                "both InfinityDB Indexes")
-        return self.index > other.index
-
-    def __le__(self, other):
-        if not isinstance(other, Index):
-            raise TypeError("Unorderable types: not "
-            "both InfinityDB Indexes")
-        return self.index <= other.index
-
-    def __ge__(self, other):
-        if not isinstance(other, Index):
-            raise TypeError("Unorderable types: not "
-            "both InfinityDB Indexes")
-        return self.index > other.index
-
-    def get_index(self):
-        return self.index
-
-
+class Float(float):
+    """
+    A holder class so we can differentiate InfinityDB floats from
+    native doubles. It prints like 5.0f and is parsed from a string
+    """
+    def __repr__(self):
+        return f'{super().__repr__()}f'
+    
+    
 def escape_uri_components(*k):
     """ This is for accessing the InfinityDB via a URL 
     that ends with a path down into the database, which 
@@ -360,7 +557,7 @@ def escape_uri_components(*k):
         elif s is False:
             p.append('false')
         elif isinstance(s, str):
-            p.append(json_quote_string(s))
+            p.append(json.dumps(s))
         elif isinstance(s, datetime.datetime):
             p.append(s.isoformat())
         elif isinstance(s, list):
@@ -370,15 +567,14 @@ def escape_uri_components(*k):
                 raise TypeError(
                     "an array index must be a single int")
             p.append('[' + str(s[0]) + ']')
+        elif isinstance(s, (EntityClass,Attribute,Bytes,ByteString,Chars,Index,Float)):
+            p.append(str(s))
         elif isinstance(s, (float, int)):
             p.append(str(s))
-        elif isinstance(s, (EntityClass, Attribute)):
-            p.append(str(s))
-        elif isinstance(s, Index):
-            p.append('[' + s.get_index() + ']')
-        else: raise TypeError("a primitive, index, "
-            "or date is expected")
-    return '/'.join([urllib.request.quote(s, safe='') for s in p])
+        else: raise TypeError(
+            "InfinityDB key component type not supported: " + str(type(s)))
+    # we let parens and [] through - they are actually safe in practice
+    return '/'.join([urllib.request.quote(s, safe='()[]:') for s in p])
 
 # Assume  dict has only one key! They are not in a particular order
 def flatten_to_list(x):
@@ -394,11 +590,13 @@ def flatten_to_list(x):
         flattened += [x]
     return flattened
     
-# Convert {x:None} to (x,), or {(x,y):None} to (x,y) or [x,y] to (x,y)
-# or {(x,y):(m,n)} to (x,y,m,n) or {(x,(y,),z):{m:None}} to (x,y,z,m)
-# recursively.
-# Assume  dict has only one key! They are not in a particular order
 def flatten_to_tuple(x):
+    """
+    Convert {x:None} to (x,), or {(x,y):None} to (x,y) or [x,y] to (x,y)
+    or {(x,y):(m,n)} to (x,y,m,n) or {(x,(y,),z):{m:None}} to (x,y,z,m)
+    recursively.
+    Assume  dict has only one key! They are not in a particular order
+    """
     flattened = ()
     if isinstance(x, dict):
         for e in x:
@@ -412,7 +610,8 @@ def flatten_to_tuple(x):
     return flattened
 
 def to_json_extended(o, depth=0, *, is_indented=True):
-    """ Return a string encoded in the infinitydb 
+    """ 
+    Return a string encoded in the infinitydb 
     extended JSON format for a structure o, including 
     dates and non-string keys. Tuples become lists.
     """
@@ -453,7 +652,7 @@ def to_json_extended(o, depth=0, *, is_indented=True):
             s += '\r\n' + ind
         s += ']'
     elif isinstance(o, str):
-        s = json_quote_string(o)
+        s = json.dumps(o)
     elif isinstance(o, datetime.datetime):
         s = o.isoformat()
     else:
@@ -461,38 +660,45 @@ def to_json_extended(o, depth=0, *, is_indented=True):
     return s
 
 
-# experimental
-def json_quote_string(s):
-    if isinstance(s, bytes):
-        s = s.decode('utf-8')
-    quoted = '"'
-    # duplicate any backslashes
-    for c in s:
-        quoted += '\\\\' if c == '\\' else '\"' if c == '"' else c
-    return quoted + '"'
-
-
-# start is offset in s. Return parsed_string, True if found, offset after string
-# Using json.loads(s) has no start, after_string, or found boolean result.
-# experimental
 def json_parse_string(s, *, start=0):
-    if len(s) <= start or  s[start] != '"':
+    """
+    start is offset in s. Return parsed_string, True if found, offset after string
+    Using json.loads(s) has no start, after_string, or found boolean result.
+    We don't use regexes because they may have ReDOS characteristics
+    and we don't want to have to prove that they don't.
+    Also, they may not match as much as possible.
+    We don't use a concatenation of each char to a string
+    because that is slow. The json.loads() is fast.
+    """
+    # find the end of the string
+    after = skip_json_string(start);
+    if after == -1:
         return '', False, start
-    content = ''
+    return json.loads(s[start:after]), True, after
+
+def skip_json_string(s, *, start=0):
+    # Return -1 or after the json string
+    # This does no string concatenation, which is slow.
+    if len(s) <= start or s[start] != '"':
+        return -1
     i = start + 1
     while i < len(s):
         c = s[i]
         if c == '"':
-            return content, True, i + 1
+            return i + 1
         elif c == '\\':
             i += 1
             if i >= len(s):
-                raise TypeError("end of string after backslash in: '" + s + "'")
-            content += s[i]
+                raise TypeError("end of string after backslash in: " + s[start:])
+            if s[i] in '"\\/bfnrt':
+                i += 1  # Skip the escaped character
+            elif s[i] == 'u':
+                i += 4  # Skip the Unicode escape sequence
+            else:
+                raise ValueError(f'Invalid escape sequence: \\{s[i]}')
         else:
-            content += c
-        i += 1
-    raise TypeError("ending quote not found in: '" + s + "'")
+            i += 1
+    raise TypeError("ending quote not found in: " + s[start:])
 
 
 # Only for differentiating ints and floats
@@ -501,16 +707,17 @@ def json_parse_string(s, *, start=0):
 _float_regex = re.compile('[+-]?[0-9]+[.]')
 # only for differentiating numbers and dates
 _date_regex = re.compile('[0-9]+[-]')
-_entity_class_attribute_regex = re.compile('[a-zA-Z][a-zA-Z0-9_.-]*')
-
+_entity_class_attribute_regex = re.compile('^[a-zA-Z][a-zA-Z0-9_.-]*$')
 
 def underscore_quote(o):
-    """ Pre-process a general structure o by changing its 
-    keys and dates to strings using prefixed underscores 
-    as a quote.
-    
-    The result is suitable for JSON encoding.
-    TODO: byte[], char[], ByteString
+    """
+    Convert a dict, list, or tuple into one containing only
+    string elements recursively. An original string is unchanged, but all
+    other component types are converted to tokens preceded by
+    an underscore. Dates are converted to quoted ISO strings
+    preceded by an underscore. An original string starting with
+    an underscore has another underscore stuffed at the front.
+    The result is suitable for JSON encoding by json.dumps().
     """
     if isinstance(o, dict):
         return {underscore_quote_key(k) : underscore_quote(v)
@@ -519,19 +726,13 @@ def underscore_quote(o):
         return [underscore_quote(v) for v in o]
     elif isinstance(o, tuple):
         return tuple(underscore_quote(v) for v in o)
-    elif isinstance(o, bytes):
-        o = o.decode('utf-8')
-        return o if o[0] != '_' else '_' + o
-    elif isinstance(o, str):
-            # stuff an extra underscore
-            return o if o == '' or o[0] != '_' else '_' + o
-    elif isinstance(o, datetime.datetime):
-        return '_' + o.isoformat()
-    elif isinstance(o, EntityClass) or isinstance(o, Attribute):
-        return '_' + str(o)
-    else: return o
+    return underscore_quote_value(o)
 
-
+def underscore_quote_value(v):
+    if v == None or isinstance(v, (bool, int, float)) and not isinstance(v, (Float,Index)):
+        return v
+    return underscore_quote_key(v)
+    
 def underscore_quote_key(k):
     """ Make any primitive or date into an 'underscore-quoted' 
      string for use as a JSON key when serializing into JSON"""
@@ -539,7 +740,7 @@ def underscore_quote_key(k):
         return '_null'
     elif isinstance(k, bool):
         return '_true' if k else '_false'
-    elif isinstance(k, int) or isinstance(k, float):
+    elif isinstance(k, (int, float)):
         return '_' + str(k)
     elif isinstance(k, bytes):
         k = k.decode('utf-8')
@@ -550,10 +751,10 @@ def underscore_quote_key(k):
         return k if k[:1] != '_' else '_' + k
     elif isinstance(k, datetime.datetime):
         return '_' + k.isoformat()
-    elif isinstance(k, EntityClass) or isinstance(k, Attribute):
+    elif isinstance(k, (EntityClass,Attribute,Bytes,ByteString,Chars,Index,Float)):
         return '_' + str(k)
     else:
-        raise TypeError('keys must be primitive or date')
+        raise TypeError("InfinityDB key component type not supported: " + str(type(k)))
 
 
 def underscore_unquote(o):
@@ -590,11 +791,17 @@ def underscore_unquote(o):
     else: return o
 
 
-# TODO: byte string, byte array, char array
+# This should be parse_component but we leave it
 def parse_primitive(s):
     if len(s) == 0:
         raise TypeError("InfinityDB primitive "
                         "value expected, but is empty")
+    elif s[0] == '"':
+        after = skip_json_string(s)
+        if after == -1:
+            raise TypeError("InfinityDB string "
+                                "not parsed correctly: '" + s + "'")
+        return json.loads(s[0:after])
     elif s == 'true':
         return True
     elif s == 'false':
@@ -606,11 +813,11 @@ def parse_primitive(s):
             return dateutil.parser.parse(s)
 #        elif match(_float_regex, s):
         elif '.' in s:
-            # BUG
-            # we lose the distinction between float and double
-            # provided by InfinityDB
-            return float(s if s[-1:] != 'f' else s[:-1])
-        else: return int(s)
+            if s[-1] == 'f':
+                return Float(float(s[:-1]))
+            return float(s)
+        else: 
+            return int(s)
     elif s[0] == '[':
         if s.find(']') != len(s) - 1:
             raise TypeError(
@@ -622,51 +829,70 @@ def parse_primitive(s):
             raise TypeError("InfinityDB primitive index "
                 "component must contain an int: '" + s + "'")
         return Index(index)
+    elif s.startswith('Bytes(') and s.endswith(')'):
+        return Bytes(Bytes.token_to_bytes(s))
+    elif s.startswith('ByteString(') and s.endswith(')'):
+        return ByteString(ByteString.token_to_bytes(s))
+    elif s.startswith('Chars(') and s.endswith(')'):
+        return Chars(Chars.token_to_chars(s))
     elif _entity_class_attribute_regex.match(s):
         c = s[0]
         if 'A' <= c <= 'Z':
             return EntityClass(s)
         elif 'a' <= c <= 'z':
             return Attribute(s)
-    elif s[0] == '"':
-        parsed_string, found, offset_after_string = json_parse_string(s);
-        if found:
-            if offset_after_string != len(s):
-                raise TypeError("InfinityDB string "
-                                "does not end at component end: '" + s + "'")
-            return parsed_string
     raise TypeError('InfinityDB primitive value expected: ' + s)
 
 
-# Note \r and \n are considered white space between tokens
-def parse_token_string_into_components(s):
-    """ Convert a string into a list of components as tokens """
+def parse_token_string_into_components(s, *, start=0):
+    """ 
+    Convert a string of tokens into a list of components
+    Whitespace between components is spaces, CR, LF
+    We especially hate TABs, and InfinityDB does 
+    not allow them anywhere, such as in i-code.
+    """
     components = []
-    component = ''
-    i = 0;
-#    while i < len(s) and s[i] not in '\r\n\t\v\f':
+    i = start;
     while True:
-        # handle embedded white
-        parsed_string, found, offset_after_string = json_parse_string(s, start=i)
-        if  found:
-            i = offset_after_string
-            component = parsed_string
-        else:
-            # Skip non-white. Only strings contain white.
-            j = i
-            while j < len(s) and s[j] not in ' \r\n\t\v\f':
-                j += 1
-            component = parse_primitive(s[i:j])
-            i = j
+        after = skip_component(s, start=i)
+        if after == -1:
+            break
+        component = parse_primitive(s[i:after])
+        i = after
         components.append(component)
         # skip white between components
-        while i < len(s) and s[i] in ' \r\n\t\v\f':
+        while i < len(s) and s[i] in ' \r\n':
             i += 1
         if i == len(s):
             break
+    if i < len(s):
+        raise TypeError("InfinityDB components "
+                        "do not end at end of string: pos=" + i + " '" + s + "'")
     return components
 
-
+def skip_component(s, *, start=0):
+    # return -1 or the position after the next component
+    if len(s) <= start:
+        return -1
+    # handle embedded white. Strings and Chars() are special
+    if (s[start] == '"'):
+        return skip_json_string(s, start=start)
+    elif s[start:].startswith('Chars('):
+        i = skip_json_string(s, start=start + 6)
+        if i == -1:
+            raise TypeError("InfinityDB Chars() "
+                            "missing string: '" + s + "'")
+        if s[i] == ')':
+            return i + 1 
+        else:
+            raise TypeError("InfinityDB Chars()  missing ')': '" + s + "'")
+    else:
+        # Skip non-white. This prohibits all control chars
+        i = start
+        while i < len(s) and s[i] > ' ':
+            i += 1
+        return i
+        
 def json_quote_primitives(o):
     """ Pre-process recursively a structure of dicts, lists and tuples 
     by changing dates to quoted ISO strings, strings to JSON quoted 
@@ -682,6 +908,7 @@ def json_quote_primitives(o):
         return {json_quote_primitive(k) : json_quote_primitives(v)
                 for k, v in o.items()}
     elif isinstance(o, list):
+
         return [json_quote_primitives(v) for v in o]
     elif isinstance(o, tuple):
         return tuple(json_quote_primitives(v) for v in o)
@@ -690,18 +917,11 @@ def json_quote_primitives(o):
 
 
 def json_quote_primitive(o):
-    """ TODO InfinityDB CharArray, ByteArray, and ByteString 
-    component types, which need
-    their own classes like EntityClass and Attribute.
-    However, we use those only in the db itself, because
-    we access them as blobs except ByteString, which is not 
-    used much.
-    """
     if isinstance(o, bytes):
         o = o.decode('utf-8')
     if isinstance(o, str):
         # doubly-quoted
-        return '"' + json_quote_string(o) + '"'
+        return json.dumps(o)
     elif isinstance(o, datetime.datetime):
         return '"' + o.isoformat() + '"'
     return '"' + str(o) + '"'
@@ -771,14 +991,11 @@ def flatten_to_tuples(o, *, flattened_lists, compact_tips):
     else:
         return uncompact_tree_tips(rslt)
 
-""" Flatten, preserving lists.
-
-Any Index keys i.e. components already there 
-become part of the tuples.
-"""
-
-
 def flatten_to_tuples_preserving_lists(o):
+    """ Flatten, preserving lists.
+    Any Index keys i.e. components already there 
+    become part of the tuples.
+    """
     if not o:
         return None
     if isinstance(o, dict):
@@ -794,11 +1011,13 @@ def flatten_to_tuples_preserving_lists(o):
                     if k2 == None:
                         continue
                     if isinstance(k, (EntityClass, Attribute)):
+                        if not k in rslt:
+                            rslt[k] = {}
                         if isinstance(k2, (EntityClass, Attribute)):
-                            rslt[k] = {():{k2:v2}}
+                            if not () in rslt[k]:
+                                rslt[k] = {() : {}}
+                            rslt[k][()][k2] = v2
                         else:
-                            if not k in rslt:
-                                rslt[k] = {}
                             rslt[k][k2] = v2
                     else:
                         if isinstance(k2, (EntityClass, Attribute)):
@@ -813,7 +1032,7 @@ def flatten_to_tuples_preserving_lists(o):
                 else:
                     rslt[(k,)] = nested
             elif v == None:
-                rslt[(k)] = None
+                rslt[(k,)] = None
             else:
                 rslt[(k, v)] = None
         return rslt
@@ -821,13 +1040,11 @@ def flatten_to_tuples_preserving_lists(o):
         return [flatten_to_tuples_preserving_lists(e) for e in o]
     return {(o,):None}
 
-""" Convert lists in the dict tree to lists.
-
-This prepares for flattening_to_tuples().
-"""
-
 
 def flatten_lists_to_indexes(o):
+    """ Convert lists in the dict tree to lists.
+    This prepares for flattening_to_tuples().
+    """
     if isinstance(o, dict):
         return {k:flatten_lists_to_indexes(v) for k, v in o.items()}
     elif isinstance(o, list):
@@ -836,32 +1053,30 @@ def flatten_lists_to_indexes(o):
     else:
         return o
 
-""" 
-Undo the effects of flatten_to_tuples() except for 
-the conversion of Index components back into lists.
-Also see unflatten_lists_from_indexes().So for {(x,y):z}
-you get {x :{y: {z: None}}}. Use compact_tree_tips() if
-you want, so that {..{x: {y: None}}} becomes {..{x:y}}.
-A simple {x:y} is unchanged.
-The form {x : {y : {}}} is not used, because it 
-can be interpreted as non-existent even though it
-is more appealing and might sometimes be easier to work with.
-Also, x or [y,z] is unchanged but [(x,y),(z)] becomes
-[{x: {y: None}},{z: None}]. A bare (x,y) becomes {x: {y: Nnne}}
-Generally, the server regards x and {x : None} as the same, 
-both representing a singleton x.
-
-This makes everything convertible into JSON and from JSON
-into Items, for the REST interface to InfinityDB v6 server.
-However, the reverse conversion does not produce the same
-tuple keys, and tuple keys are only created when nested
-inside or outside of metas. The reverse conversion also
-normalizes by combining immediately nested tuple keys 
-into a single tuple key. 
-
-"""
-
 def unflatten_from_tuples(o):
+    """ 
+    Undo the effects of flatten_to_tuples() except for 
+    the conversion of Index components back into lists.
+    Also see unflatten_lists_from_indexes().So for {(x,y):z}
+    you get {x :{y: {z: None}}}. Use compact_tree_tips() if
+    you want, so that {..{x: {y: None}}} becomes {..{x:y}}.
+    A simple {x:y} is unchanged.
+    The form {x : {y : {}}} is not used, because it 
+    can be interpreted as non-existent even though it
+    is more appealing and might sometimes be easier to work with.
+    Also, x or [y,z] is unchanged but [(x,y),(z)] becomes
+    [{x: {y: None}},{z: None}]. A bare (x,y) becomes {x: {y: Nnne}}
+    Generally, the server regards x and {x : None} as the same, 
+    both representing a singleton x.
+
+    This makes everything convertible into JSON and from JSON
+    into Items, for the REST interface to InfinityDB v6 server.
+    However, the reverse conversion does not produce the same
+    tuple keys, and tuple keys are only created when nested
+    inside or outside of metas. The reverse conversion also
+    normalizes by combining immediately nested tuple keys 
+    into a single tuple key. 
+    """
     result = {}
     _unflatten_from_tuples_1(o, (), result)
     return result
@@ -1068,7 +1283,7 @@ def unflatten_lists_from_indexes(o, *, strict=True,
         for index in sorted(o):
             # handle sparseness if present
             if not collapse_sparseness:
-                while i < index.get_index():
+                while i < index:
                     rslt.append(None)
                     i += 1
             rslt.append(unflatten_lists_from_indexes(
@@ -1136,7 +1351,7 @@ class InfinityDBAccessor:
     """
 
     def __init__(self, server_url, *, db=None, user=None, password=None,
-                 default_parameters={}):
+                 default_parameters={}, verify=None):
         self.server_url = server_url
         # default if not provided in client call
         self.db = db
@@ -1147,26 +1362,8 @@ class InfinityDBAccessor:
         self.default_parameters = default_parameters.copy()
         print(ssl.get_default_verify_paths())
         self.session = Session()
-        self.is_verification_enabled = self.check_verification_required(self.server_url) 
+        self.verify = verify
 
-    # Return False for special domains that are not to be verified
-    # Eventually some kind of configurability might be nice.
-    # Disabling verification allows https for encryption, but disables
-    # server authentication, which is fine for AWS EC2 instances and azure
-    # instances. 
-    # The server always has some kind of cert, self-signed or otherwise.
-    # We do not expect it to be possible to spoof
-    # a domain name ending with .amazonaws.com, but to be more specific
-    # like compute.amazonaws.com would possibly miss 
-    # some like compute-X.amazonaws.com. Not sure if this is right for
-    # azure, but google cloud has no default public domain names at all.
-    # Without this disabling, you cannot launch an instance and be able to use
-    # it immediately via its default temporary public ip.
-    def check_verification_required(self, url):
-        hostname = urlparse(url).hostname
-        # leave the initial dot there.
-        return not hostname.endswith('.amazonaws.com') and not hostname.endswith('.azure.com') 
-        
     def _make_headers(self, content_type=None):
         headers = {}
         if self.user is not None:
@@ -1188,9 +1385,9 @@ class InfinityDBAccessor:
 #        response = self.session.send(prepped_request)
         try:
             response = self.session.request('HEAD', full_url,
-                                        headers=headers, verify=self.is_verification_enabled)
+                                        headers=headers, verify=self.verify)
         except ConnectionError as ce:
-            raise InfinityDBError(code=400, reason='cannot connect to ' + full_url)
+            raise InfinityDBError(code=400, reason='cannot connect to ' + full_url + ' ' + str(ce))
         if (response.status_code == 204):
             response.status_code = 200
         return response.status_code, response.reason
@@ -1245,9 +1442,9 @@ class InfinityDBAccessor:
         try:
             response = self.session.request(method, full_url,
                                         headers=headers,
-                                        data=data, verify=self.is_verification_enabled)
+                                        data=data, verify=self.verify)
         except ConnectionError as ce:
-            raise InfinityDBError(code=400, reason='cannot connect to ' + full_url)
+            raise InfinityDBError(code=400, reason='cannot connect to ' + full_url + ' ' + str(ce))
         # touching this finishes the operation
         content = response.content
         if content == None:
