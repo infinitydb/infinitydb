@@ -643,20 +643,20 @@ idb.Blob = class IdbBlob {
 				' missing attribute com.infinitydb.blob.bytes ' + idb.printType(array));
 		}
 		
-		var theFullData = null;
-		if (array.length === 0) {
-			theFullData = new Uint8Array(0);
-		} else {
-			const chunks = [];
-			for (const b of array)  {
-				const idbBytes = new idb.Bytes().parse(b.slice(1));
-				chunks.push(idbBytes.v);
-			} 
-			theFullData = Buffer.concat(chunks);
-			if (!(theFullData instanceof Uint8Array)) {
-				theFullData = new Uint8Array(theFullData);
-			}
+		const chunks = [];
+		let fullLength = 0;
+		for (const b of array)  {
+			const idbBytes = new idb.Bytes().parse(b.slice(1));
+			chunks.push(idbBytes.v);
+			fullLength += idbBytes.v.length;
+		} 
+		let theFullData = new Uint8Array(fullLength);
+		let pos = 0;
+		for (let chunk of chunks) {
+			theFullData.set(chunk, pos);
+			pos += chunk.length;
 		}
+
 		this.v = theFullData;
 		this.contentType = contentType;
 		return this;
@@ -1029,7 +1029,7 @@ idb.Accessor = class IdbAccessor {
 			success = (response.status == 200);
 			if (success) {
 				if (blob_response) {
-					result = new idb.Blob(response.data, response_content_type);
+					result = new Blob(response.data, {type: response_content_type});
 				}
 				else {
 					result = response.data;
@@ -1068,9 +1068,7 @@ idb.Accessor = class IdbAccessor {
 			if (success) {
 				response_content_type = response.headers.get("Content-Type");
 				if (blob_response) {
-					let blob = await response.blob();
-					let data = await blob.arrayBuffer();
-					result = new idb.Blob(data, response_content_type);
+					result = await response.blob();
 
 				}
 				else if (response_content_type == "application/json") {
@@ -1147,7 +1145,7 @@ idb.Accessor = class IdbAccessor {
 		let query_url = this.make_query_url(prefix);
 		query_url.searchParams.append("action", "put-blob");
 
-		let [success, result, content_type] = await this._do_request(query_url, "POST", blob.v, blob.contentType, false);
+		let [success, result, content_type] = await this._do_request(query_url, "POST", blob, blob.type, false);
 		return success;
 	}
 
