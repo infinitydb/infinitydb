@@ -1449,7 +1449,7 @@ class InfinityDBAccessor:
         content = response.content
         if content == None:
             raise InfinityDBError(code=400, reason="Null content")
-        if not response.status_code in (200, 204):
+        if not response.status_code in (200, 204, 205):
             raise InfinityDBError(code=response.status_code, reason=response.reason + " " + str(prefix))
         if always_return_none:
             return None
