@@ -1388,7 +1388,7 @@ class InfinityDBAccessor:
                                         headers=headers, verify=self.verify)
         except ConnectionError as ce:
             raise InfinityDBError(code=400, reason='cannot connect to ' + full_url + ' ' + str(ce))
-        if (response.status_code == 204):
+        if (response.status_code in (204, 205)):
             response.status_code = 200
         return response.status_code, response.reason
 
