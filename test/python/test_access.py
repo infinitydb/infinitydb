@@ -213,6 +213,17 @@ class TestInfinityDB(unittest.TestCase):
         s = to_json_extended({'a':1,'b':2,'_c':3,EntityClass('EC'):True,Attribute('att'):False,Bytes([0x5A,0x26]):Bytes([0x5A,0x26]),ByteString([0x5A,0x26]):ByteString([0x5A,0x26]),Index(3):Index(3),Chars('ccc'):Chars('ccc')})
         s = re.sub(r'\s', '', s)
         self.assertEqual(s, '{"a":1,"b":2,"_c":3,EC:true,att:false,Bytes(5A_26):Bytes(5A_26),ByteString(5A_26):ByteString(5A_26),[3]:[3],Chars("ccc"):Chars("ccc")}')   
+
+    def test_unflatten_from_tuples(self):
+        t1 = ('a', 0)
+        t2 = ('b', 1)
+
+        s1 = unflatten_from_tuples(t1)
+        s2 = unflatten_from_tuples(t2)
+
+        self.assertEqual(s1, {'a': {0: None}})
+        self.assertEqual(s2, {'b': {1: None}})
+
         
     def test_underscore_quote(self):
         s = underscore_quote({True:False,
