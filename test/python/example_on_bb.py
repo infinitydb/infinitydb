@@ -24,7 +24,7 @@ def disable_verification():
 
 # Our alternate port is 37411 but it is sometimes blocked by firewalls, so we default to 443
 
-case = 3
+case = 1
 if case == 1: 
     # Use the demo server
     infinitydb_url = 'https://infinitydb.com/infinitydb/data'
