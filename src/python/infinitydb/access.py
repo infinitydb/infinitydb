@@ -1123,14 +1123,14 @@ def _unflatten_from_tuples_insert(result, item):
     if not isinstance(item, tuple):
         raise TypeError
     elif isinstance(result, list):
-        if item[0] != INDEX:
+        if not (isinstance(item[0], Index) and (item[0] == INDEX)):
             raise TypeError
         result.append(unflatten_from_tuples(item[1:]))
     elif isinstance(result, dict):
         if not item[0] in result:
-            if item[0] == INDEX:
+            if isinstance(item[0], Index) and item[0] == INDEX:
                 raise TypeError
-            elif len(item) > 1 and item[1] == INDEX:
+            elif len(item) > 1 and isinstance(item[1], Index) and item[1] == INDEX:
                 result[item[0]] = []
             elif len(item) == 1:
                 result[item[0]] = None
