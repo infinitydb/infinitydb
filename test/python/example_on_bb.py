@@ -89,7 +89,7 @@ def pprint(o, indent=0):
 def get_documentation():
     # This shows direct access to the db, but we prefer query-based access below 
     # To see the documentation graphically in the demo/readonly database, go to:
-    # https://infinitydb.com:37411/infinitydb/data/demo/readonly/Documentation?action=edit
+    # https://infinitydb.com/infinitydb/data/demo/readonly/Documentation?action=edit
     # or without the action=edit to see it in JSON form.
     # Here we read that JSON into content, with success being a boolean.
     # The success only indicates that some data was read, not that there was an error.
