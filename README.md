@@ -9,7 +9,10 @@ up to date as well.
 
 Infinitydb is at boilerbay.com in the form 
 of either a complete server InfinityDB Server, or as a Java jar
-with InfinityDB Embedded or InfinityDB Encrypted. 
+with InfinityDB Embedded or InfinityDB Encrypted. In the
+Amazon Web Services Marketplace you can subscribe and 
+launch InfinityDB Server instances and then edit data and
+administer the server via web and do REST requests.
 
 The Server has a flexible declarative PatternQuery 
 language that is easy to use to define REST APIs with no 
