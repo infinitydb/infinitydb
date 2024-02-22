@@ -1,6 +1,9 @@
 # infinitydb
 The open-source REST client access code for the InfinityDB
-NoSQL Java DBMS at boilerbay.com.
+NoSQL Java DBMS at boilerbay.com. InfinityDB is even more
+flexible than 'JSON document' databases without sacrificing the
+critical RDBMS features like transactions, joins, immediate
+consistency, referential integrity and more.
 
 There is helper code for Java, JavaScript, and Python for REST, but
 you can do it directly as well. The python can be imported with
