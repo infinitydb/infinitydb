@@ -567,9 +567,9 @@ idb.Blob = class IdbBlob {
 		if (data != null) {
 			if (typeof contentType !== 'string') {
 				throw new TypeError('new IdbBlob() contentType must be a string' +
-					' but was ' + idbPrintType(contentType));
+					' but was ' + idb.printType(contentType));
 			}
-//			console.log("blob data type " + idbPrintType(data));
+//			console.log("blob data type " + idb.printType(data));
 			if (typeof data === 'string') {
 				if (contentType === 'application/json') {
 					this.v = JSON.parse(data);
@@ -665,10 +665,10 @@ idb.Blob = class IdbBlob {
 	// Preserves this.
 	toBlobStructure() {
 		if (!(this.v instanceof Uint8Array)) {
-			throw new TypeError('Cannot convert to blob structure: data is not a Uint8Array ' + idbPrintType(this.v));
+			throw new TypeError('Cannot convert to blob structure: data is not a Uint8Array ' + idb.printType(this.v));
 		}
 		if (typeof this.contentType !== 'string') {
-			throw new TypeError('Cannot convert to blob structure: missing contentType string: was ' + idbPrintType(this.contentType));
+			throw new TypeError('Cannot convert to blob structure: missing contentType string: was ' + idb.printType(this.contentType));
 		}
 		const bytesArray = [];
 		for (let i = 0; i < this.v.length; i += 1024) {
@@ -1013,6 +1013,7 @@ idb.Accessor = class IdbAccessor {
 		const options = {
 			url: query_url,
 			method: method,
+			insecureHTTPParser: true,
 			auth: {username: this.username, password: this.password},
 			data: data,
 			headers: {
@@ -1029,7 +1030,7 @@ idb.Accessor = class IdbAccessor {
 			success = (response.status == 200);
 			if (success) {
 				if (blob_response) {
-					result = new idb.Blob(response.data, response_content_type);
+					result = new Blob(response.data, {contentType: response_content_type});
 				}
 				else {
 					result = response.data;
@@ -1068,9 +1069,7 @@ idb.Accessor = class IdbAccessor {
 			if (success) {
 				response_content_type = response.headers.get("Content-Type");
 				if (blob_response) {
-					let blob = await response.blob();
-					let data = await blob.arrayBuffer();
-					result = new idb.Blob(data, response_content_type);
+					result = await response.blob();
 
 				}
 				else if (response_content_type == "application/json") {
@@ -1147,7 +1146,7 @@ idb.Accessor = class IdbAccessor {
 		let query_url = this.make_query_url(prefix);
 		query_url.searchParams.append("action", "put-blob");
 
-		let [success, result, content_type] = await this._do_request(query_url, "POST", blob.v, blob.contentType, false);
+		let [success, result, content_type] = await this._do_request(query_url, "POST", blob, blob.contentType, false);
 		return success;
 	}
 

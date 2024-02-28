@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert';
 
 let INTERFACE = "examples";
-let server = new idb.Accessor("https://infinitydb.com:37411/infinitydb/data", "demo/writeable", "testUser", "db");
+let server = new idb.Accessor("https://infinitydb.com/infinitydb/data", "demo/writeable", "testUser", "db");
 
 
 test('unflattenQueryData', (t) => {
