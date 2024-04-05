@@ -1027,7 +1027,7 @@ idb.Accessor = class IdbAccessor {
 		try {
 			response = await axios.request(options);
 			response_content_type = response.headers.get("Content-Type");
-			success = (response.status == 200);
+			success = (response.status == 200 || response.status == 205);
 			if (success) {
 				if (blob_response) {
 					result = new Blob(response.data, {contentType: response_content_type});
@@ -1065,7 +1065,7 @@ idb.Accessor = class IdbAccessor {
 		let request = new Request(query_url, options);
 		try {
 			let response = await fetch(request);
-			success = (response.status == 200);
+			success = (response.status == 200 || response.status == 205);
 			if (success) {
 				response_content_type = response.headers.get("Content-Type");
 				if (blob_response) {
@@ -1083,6 +1083,9 @@ idb.Accessor = class IdbAccessor {
 		}
 		catch (error) {
 			console.error("Error occurred while connecting to InfinityDB server " + this.server_url);
+			console.error("Query URL: " + query_url);
+			console.error("Query data: " + data);
+
 			throw(error);
 		}
 		return [success, result, response_content_type];
