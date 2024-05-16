@@ -997,6 +997,9 @@ server = IdbAccessor("https://infinitydb.com:37411/infinitydb/data", "demo/writa
 */
 idb.Accessor = class IdbAccessor {
 	constructor(server_url, db, username, password) {
+		this.set_credentials(server_url, db, username, password);
+	}
+	set_credentials(server_url, db, username, password) {
 		this.server_url = server_url
 		this.db = db
 		this.username = username
@@ -1004,6 +1007,7 @@ idb.Accessor = class IdbAccessor {
 		this.db_url = this.server_url + "/" + this.db
 
 		this.auth = btoa(this.username + ":" + this.password)
+
 	}
 	async _do_request_axios(query_url, method, data, request_content_type, blob_response) {
 		let success = false;
