@@ -1047,7 +1047,9 @@ idb.Accessor = class IdbAccessor {
 		}
 		catch (error) {
 			console.error("Error occurred during Axios request to infinityDB Server");
-			throw(error);
+			success = false;
+			result = null;
+			response_content_type = null;
 		}
 		return [success, result, response_content_type];
 	}
@@ -1089,8 +1091,10 @@ idb.Accessor = class IdbAccessor {
 			console.error("Error occurred while connecting to InfinityDB server " + this.server_url);
 			console.error("Query URL: " + query_url);
 			console.error("Query data: " + data);
+			success = false;
+			result = null;
+			response_content_type = null;
 
-			throw(error);
 		}
 		return [success, result, response_content_type];
 	}
