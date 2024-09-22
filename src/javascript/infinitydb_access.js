@@ -1004,7 +1004,7 @@ idb.Accessor = class IdbAccessor {
 		this.db = db
 		this.username = username
 		this.password = password
-		this.db_url = this.server_url + "/" + this.db
+		this.db_url = this.server_url + "/infinitydb/data/" + this.db
 
 		this.auth = btoa(this.username + ":" + this.password)
 
