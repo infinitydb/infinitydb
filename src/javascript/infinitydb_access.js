@@ -1179,6 +1179,14 @@ idb.Accessor = class IdbAccessor {
 		return this._do_request(query_url, "POST", data, "application/json", true);
 	}
 
+	async execute_put_blob_query(prefix, data, params, content_type) {
+		let query_url = this.make_query_url(prefix);
+		query_url.searchParams.append("action", "execute-put-blob-query");
+		const params_str = JSON.stringify(idb.unflattenQueryData(params));
+		query_url.searchParams.append("params", params_str);
+		return this._do_request(query_url, "POST", data, content_type, false);
+	}
+
 
 	async head() {
 		let [success, result, content_type] = await this._do_request(this.db_url, "HEAD");
