@@ -45,7 +45,189 @@ if (typeof window == "undefined") {
 // Import this namespace in client javascript
 export const idb = {}
 
-idb.Component = class IdbComponent {
+// Ordering of component types in InfinityDB for sorting
+idb.TYPE_ORDER = {
+    CLASS: 1,
+    ATTRIBUTE: 2,
+    STRING: 3,
+    BOOLEAN: 4,
+    FLOAT: 5,
+    DOUBLE: 6, 
+    LONG: 7,
+    DATE: 8,
+    BYTES: 9,
+    BYTE_STRING: 10,
+    CHARS: 11,
+    INDEX: 12
+  };
+  
+  // Item - a sequence of components that can be atomically stored in the database.
+  // It is a path of components, and the last component is the value.
+  idb.Item = class IdbItem {
+    constructor(...components) {
+      this.components = [];
+      
+      // Add initial components
+      for (const component of components) {
+        this.addComponent(component);
+      }
+    }
+    
+    // Add a component to the item
+    addComponent(component) {
+      if (component === null || component === undefined) {
+        throw new TypeError('Cannot add null or undefined component');
+      }
+      
+      // Auto-wrap primitive values
+      if (!idb.Component.isComponent(component)) {
+        component = idb.wrapValue(component);
+      }
+      
+      this.components.push(component);
+      return this;
+    }
+    
+    // Get all components
+    getComponents() {
+      return [...this.components];
+    }
+    
+    // Get a component at a specific index
+    getComponent(index) {
+      return this.components[index];
+    }
+    
+    // Get the number of components
+    getLength() {
+      return this.components.length;
+    }
+    
+    // Convert to array of JavaScript values. This loses the component types.
+	// For example, an idb.FLoat() which is 32 bits beomes a number and can no longer be
+	// distinguished from a 64-bit double, and an idb.Double which is 64 bits
+	// that happens to be an exact integer (like 5.0) becomes a number
+	// and will be translated back to
+	// an idb.Long() when it is stored in the database.
+	// So this is lossy.
+
+    toArray() {
+      return this.components.map(component => 
+        component instanceof idb.Component ? component.v : component
+      );
+    }
+    
+    // Convert to token string representation
+    toString() {
+      return this.components.map(component => idb.toToken(component)).join(' ');
+    }
+    
+    // Create a path for URI encoding
+    toUriPath() {
+      return idb.encodeUri(...this.toArray());
+    }
+    
+    // Convert to a nested object structure for IDB
+    toIdbObject() {
+      if (this.components.length === 0) {
+        return {};
+      }
+      
+      let obj = {};
+      let current = obj;
+      
+      // Build nested structure
+      for (let i = 0; i < this.components.length - 1; i++) {
+        const comp = this.components[i];
+        const key = idb.key(comp);
+        current[key] = {};
+        current = current[key];
+      }
+      
+      // Set the leaf value
+      const lastComp = this.components[this.components.length - 1];
+      const lastKey = idb.key(lastComp);
+      current[lastKey] = null;
+      
+      return obj;
+    }
+    
+    // Create a partial item by taking components from start to end (inclusive)
+    slice(start, end) {
+      if (end === undefined) {
+        end = this.components.length - 1;
+      }
+      
+      const newItem = new idb.Item();
+      for (let i = start; i <= end && i < this.components.length; i++) {
+        newItem.addComponent(this.components[i]);
+      }
+      
+      return newItem;
+    }
+    
+    // Create from an IDB object key path like 
+	// { '_meta': { 'str': { '__str': { '_5' : null } } } }
+    static fromKeyPath(obj) {
+      const item = new idb.Item();
+      
+      let current = obj;
+      const keys = [];
+      
+      // Extract keys from nested structure
+      while (current !== null && typeof current === 'object') {
+        const objKeys = Object.keys(current);
+        if (objKeys.length === 0) {
+          break;
+        }
+        
+        const key = objKeys[0];
+        keys.push(key);
+        current = current[key];
+      }
+      
+      // Create components from keys
+      for (const key of keys) {
+        item.addComponent(idb.unQuote(key));
+      }
+      
+      return item;
+    }
+    
+    // Compare this item with another item
+    compareTo(other) {
+      if (!(other instanceof idb.Item)) {
+        throw new TypeError('Can only compare with another Item');
+      }
+      
+      const len1 = this.getLength();
+      const len2 = other.getLength();
+      const minLen = Math.min(len1, len2);
+      
+      // Compare component by component
+      for (let i = 0; i < minLen; i++) {
+        const comp1 = this.getComponent(i);
+        const comp2 = other.getComponent(i);
+        
+        // Use component's compareTo method if available
+        if (comp1.compareTo) {
+          const result = comp1.compareTo(comp2);
+          if (result !== 0) return result;
+        } else {
+          // Fall back to string comparison
+          const str1 = String(comp1);
+          const str2 = String(comp2);
+          const result = str1.localeCompare(str2);
+          if (result !== 0) return result;
+        }
+      }
+      
+      // If all components match up to the minimum length, shorter item comes first
+      return len1 - len2;
+    }
+  }
+
+  idb.Component = class IdbComponent {
 	
 	// v always has the value of any subclass.
 	
@@ -69,7 +251,103 @@ idb.Component = class IdbComponent {
 			|| o instanceof Date 
 			|| o instanceof idb.Component);
 	}
-}
+	
+	getTypeOrder() {
+		return idb.TYPE_ORDER.STRING; // Default type order
+	}
+		  
+    // Generic comparison method
+    compareTo(other) {
+		if (!(other instanceof idb.Component) && 
+			!idb.Component.isComponent(other)) {
+		  throw new TypeError('Can only compare with another Component');
+		}
+		
+		const thisType = this.getTypeOrder();
+		const otherType = other instanceof idb.Component ? 
+						 other.getTypeOrder() : 
+						 idb._getTypeOrderForValue(other);
+		
+		// First compare by type order
+		if (thisType !== otherType) {
+		  return thisType - otherType;
+		}
+		
+		// If same type, compare values
+		// Handle comparison with primitive values
+		const thisValue = this.v;
+		const otherValue = other instanceof idb.Component ? other.v : other;
+		
+		// Type-specific comparisons
+		if (thisValue instanceof Date && otherValue instanceof Date) {
+		  return thisValue.getTime() - otherValue.getTime();
+		}
+		
+		if (typeof thisValue === 'number' && typeof otherValue === 'number') {
+		  return thisValue - otherValue;
+		}
+		
+		if (thisValue instanceof Uint8Array && otherValue instanceof Uint8Array) {
+		  // Compare byte by byte
+		  const len = Math.min(thisValue.length, otherValue.length);
+		  for (let i = 0; i < len; i++) {
+			const diff = thisValue[i] - otherValue[i];
+			if (diff !== 0) return diff;
+		  }
+		  return thisValue.length - otherValue.length;
+		}
+		
+		// Default to string comparison
+		return String(thisValue).localeCompare(String(otherValue));
+	  }
+  }
+
+  // Helper function to determine type order for primitive values
+  idb._getTypeOrderForValue = function(value) {
+    if (value === null || value === undefined) {
+      throw new TypeError('Cannot determine type order for null or undefined');
+    }
+	if (value instanceof idb.Component) {
+		return value.getTypeOrder();
+	}							
+    
+    if (typeof value === 'string') {
+      // It's always a string if it's not a component - never a meta
+      return idb.TYPE_ORDER.STRING;
+    }
+
+	// This is not really recommended, because we should always use the
+	// idb.Number subclasses, which preserve the true ordering
+	// observed in the database. We lose the distinction between
+	// idb.Float, idb.Double, and idb.Long.
+    if (typeof value === 'number') {
+		// Don't do this - it ruins the ordering.
+    //   if (Number.isInteger(value)) {
+    //     return idb.TYPE_ORDER.LONG;
+    //   }
+      return idb.TYPE_ORDER.DOUBLE;
+    }
+    
+    if (typeof value === 'boolean') {
+      return idb.TYPE_ORDER.BOOLEAN;
+    }
+    
+    if (value instanceof Date) {
+      return idb.TYPE_ORDER.DATE;
+    }
+    
+    if (value instanceof Uint8Array) {
+      return idb.TYPE_ORDER.BYTES;
+    }
+    
+	throw new TypeError('Expected primitive value but was ' + value);
+	// if (typeof value === 'object' || typeof value === 'function' || Array.isArray(value)) {	
+	// 	throw new TypeError('Expected primitive value but was ' + value);
+	// }
+
+    // // Default. Not really expected to get here.
+    // return idb.TYPE_ORDER.STRING;
+  }
 
 // All but IdbMetas, string, number, boolean and Date.
 // Numbers can either be primitives or subclasses of IdbNumber.
@@ -108,6 +386,21 @@ idb.Class = class IdbClass extends idb.Meta {
 		const metaRegex = /^[A-Z][a-zA-Z\d\._]*$/;
 		return metaRegex.test(s);
 	}
+    getTypeOrder() {
+      return idb.TYPE_ORDER.CLASS;
+    }
+    
+    // Classes compare first by name
+    compareTo(other) {
+
+      // If other is not a Class, first compare by type order
+      if (!(other instanceof idb.Class)) {
+        return this.getTypeOrder() - idb._getTypeOrderForValue(other);
+      }
+      
+      // Both are Classes, compare by name
+      return this.v.localeCompare(other.v);
+    }
 }
 
 // Instead of these, you can also write { _myAttribute : 5; }
@@ -124,7 +417,21 @@ idb.Attribute = class IdbAttribute extends idb.Meta {
 		const metaRegex = /^[a-z][a-zA-Z\d\._]*$/;
 		return metaRegex.test(s);
 	}
-}
+    getTypeOrder() {
+		return idb.TYPE_ORDER.ATTRIBUTE;
+	}
+	  
+	  // Attributes compare first by name
+	compareTo(other) {
+		// If other is not an Attribute, first compare by type order
+		if (!(other instanceof idb.Attribute)) {
+		  return this.getTypeOrder() - idb._getTypeOrderForValue(other);
+		}
+		
+		// Both are Attributes, compare by name
+		return this.v.localeCompare(other.v);
+	  }
+  }
 
 // Dates are handled separately even though they are InfinityDB
 // 'primitive' types.
@@ -171,10 +478,24 @@ idb.Index = class IdbIndex extends idb.Primitive {
 		return this;
 	}
 	
-	toString() {
+    getTypeOrder() {
+		return idb.TYPE_ORDER.INDEX;
+    }
+	// Indices compare numerically
+	compareTo(other) {
+		if (!(other instanceof idb.Index)) {
+			return this.getTypeOrder() - idb._getTypeOrderForValue(other);
+		}
+		
+		const otherValue = other instanceof idb.Index ? other.v : other;
+		return this.v - otherValue;
+		}
+	  
+    toString() {
 		return '[' + this.v + ']';
 	}
 }
+
 // We insist on caps
 idb.hexChars = '0123456789ABCDEF';
 
@@ -273,56 +594,184 @@ idb.ByteArray = class IdbByteArray extends idb.Primitive {
 	}
 }
 
-// The InfinityDB byte array data type. These are short, and must fit in
-// an Item when encoded, which is 1665 chars long.
-
-idb.Bytes = class IdbBytes extends idb.ByteArray {
-	constructor(o) {
-		super(o, 'Bytes');
-	}
-}
-
-// The InfinityDB byte string data type.
-// Like idb.Bytes(), but stored in InfinityDB so that it sorts like a string
-// whereas Bytes() sorts according to its initial length code.
-// These are short, and must fit in an Item when encoded, which is 1665 chars long.
-
 idb.ByteString = class IdbByteString extends idb.ByteArray {
 	constructor(o) {
-		super(o, 'ByteString');
+	  super(o, 'ByteString');
 	}
-}
-
-// The InfinityDB char array data type. Can be in CLOBs like
-// Bytes, but rarely used.
-// These are short, and must fit in an Item when encoded, which is 1665 chars long.
-
-idb.Chars = class IdbChars extends idb.Primitive {
+	
+	getTypeOrder() {
+	  return idb.TYPE_ORDER.BYTE_STRING;
+	}
+	
+	// ByteStrings compare byte by byte
+	compareTo(other) {
+	  if (!(other instanceof idb.ByteString)) {
+		// If other is not ByteString, first compare by type order
+		return this.getTypeOrder() - idb._getTypeOrderForValue(other);
+	  }
+	  
+	  const otherBytes = other instanceof idb.ByteArray ? other.v : other;
+	  
+	  // Compare byte by byte
+	  const len = Math.min(this.v.length, otherBytes.length);
+	  for (let i = 0; i < len; i++) {
+		const diff = this.v[i] - otherBytes[i];
+		if (diff !== 0) return diff;
+	  }
+	  
+	  // If all bytes match up to the minimum length, shorter array comes first
+	  return this.v.length - otherBytes.length;
+	}
+  }
+  
+  // Bytes compare by length first, then contents
+  idb.Bytes = class IdbBytes extends idb.ByteArray {
+	constructor(o) {
+	  super(o, 'Bytes');
+	}
+	
+	getTypeOrder() {
+	  return idb.TYPE_ORDER.BYTES;
+	}
+	
+	// Bytes compare by length first, then contents for speed
+	compareTo(other) {
+	  if (!(other instanceof idb.Bytes) && 
+		  !(other instanceof Uint8Array)) {
+		// If other is not Bytes, first compare by type order
+		return this.getTypeOrder() - idb._getTypeOrderForValue(other);
+	  }
+	  
+	  const otherBytes = other instanceof idb.ByteArray ? other.v : other;
+	  
+	  // First compare by length for speed
+	  const lenDiff = this.v.length - otherBytes.length;
+	  if (lenDiff !== 0) return lenDiff;
+	  
+	  // If same length, compare byte by byte
+	  for (let i = 0; i < this.v.length; i++) {
+		const diff = this.v[i] - otherBytes[i];
+		if (diff !== 0) return diff;
+	  }
+	  
+	  return 0; // Equal
+	}
+  }
+  
+  // Chars compare by length first, then contents
+  idb.Chars = class IdbChars extends idb.Primitive {
 	constructor(s) {
-		super(s);
-		if (s == null) {
-			this.v = "";
-		} else if (typeof s == 'object' && s instanceof Uint8Array) {
-			const decoder = new TextDecoder('utf-8');
-			this.v = decoder.decode(s);
-		} else if (typeof s === 'string') {
-			this.v = s;
-		} else {
-   			throw new TypeError('expected string or Uint8Array but was ' + o);
-   		}
+	  super(s);
+	  if (s == null) {
+		this.v = "";
+	  } else if (typeof s == 'object' && s instanceof Uint8Array) {
+		const decoder = new TextDecoder('utf-8');
+		this.v = decoder.decode(s);
+	  } else if (typeof s === 'string') {
+		this.v = s;
+	  } else {
+		throw new TypeError('expected string or Uint8Array but was ' + s);
+	  }
+	}
+	
+	getTypeOrder() {
+	  return idb.TYPE_ORDER.CHARS;
 	}
 	
 	parse(s) {
-		if (!s.startsWith('Chars(') || !s.endsWith(')')) {
-			throw new TypeError('"expected "Chars(jsonstring)" but was ' + s);
-		}
-		this.v = JSON.parse(s.slice(6, -1));
-		return this;
+	  if (!s.startsWith('Chars(') || !s.endsWith(')')) {
+		throw new TypeError('"expected "Chars(jsonstring)" but was ' + s);
+	  }
+	  this.v = JSON.parse(s.slice(6, -1));
+	  return this;
 	}
 	
 	toString() {
-		return 'Chars(' + JSON.stringify(this.v) + ')';
+	  return 'Chars(' + JSON.stringify(this.v) + ')';
 	}
+	
+	// Chars compare by length first, then string value for speed
+	compareTo(other) {
+	  if (!(other instanceof idb.Chars)) {
+		// If other is not Chars, first compare by type order
+		return this.getTypeOrder() - idb._getTypeOrderForValue(other);
+	  }
+	  
+	  const otherValue = other instanceof idb.Chars ? other.v : other;
+	  
+	  // First compare by length for speed
+	  const lenDiff = this.v.length - otherValue.length;
+	  if (lenDiff !== 0) return lenDiff;
+	  
+	  // If same length, compare by string value
+	  return this.v.localeCompare(otherValue);
+	}
+}
+  
+idb.BooleanValue = class IdbBooleanValue extends idb.Primitive {
+    constructor(value) {
+      super(Boolean(value));
+    }
+    
+    getTypeOrder() {
+      return idb.TYPE_ORDER.BOOLEAN;
+    }
+    
+    toString() {
+      return this.v.toString();
+    }
+    
+    // Booleans compare with false < true
+    compareTo(other) {
+      if (!(other instanceof idb.BooleanValue) && 
+          !(typeof other === 'boolean')) {
+        // If other is not a Boolean, first compare by type order
+        return this.getTypeOrder() - idb._getTypeOrderForValue(other);
+      }
+      
+      const otherValue = other instanceof idb.BooleanValue ? other.v : other;
+      return this.v === otherValue ? 0 : (this.v ? 1 : -1);
+    }
+}
+
+idb.Date = class IdbDate extends idb.Primitive {
+    constructor(value) {
+      if (!(value instanceof Date)) {
+        value = new Date(value);
+      }
+      super(value);
+      if (isNaN(this.v.getTime())) {
+        throw new TypeError('Invalid date: ' + value);
+      }
+    }
+    
+    getTypeOrder() {
+      return idb.TYPE_ORDER.DATE;
+    }
+    
+    getTimestamp() {
+      return this.v.getTime();
+    }
+    
+    toISOString() {
+      return this.v.toISOString();
+    }
+    
+    toString() {
+      return this.v.toISOString();
+    }
+    
+    // Dates compare by timestamp
+    compareTo(other) {
+      if (!(other instanceof idb.DateValue) && 
+          !(other instanceof Date)) {
+        // If other is not a Date, first compare by type order
+        return this.getTypeOrder() - idb._getTypeOrderForValue(other);
+      }
+      
+      const otherValue = other instanceof idb.DateValue ? other.v : other;
+      return this.v.getTime() - otherValue.getTime();
+    }
 }
 
 // There is corresponding type within the db: use idb.Long, idb.Double, or idb.Float
@@ -343,12 +792,25 @@ idb.Double = class IdbDouble extends idb.Number {
 		super(n);
 	}
 
+	getTypeOrder() {
+		return idb.TYPE_ORDER.DOUBLE;
+	}
+
 	// This format is how InfinityDB identifies a double: always a decimal
 	// point. Normal JavaScript numbers are interpreted as doubles.
-	// Within InfinityDB this is binary and distinguished from the others.
-
 	toString() {
 		return Number.isInteger(this.v) ? this.v + '.0' : this.v.toString();
+	}
+
+	// Doubles compare by numeric value
+	compareTo(other) {
+		if (!(other instanceof idb.Double)) {
+			// If other is not a Double, first compare by type order
+			return this.getTypeOrder() - idb._getTypeOrderForValue(other);
+		}
+		
+		const otherValue = other instanceof idb.Double ? other.v : other;
+		return this.v - otherValue;
 	}
 }
 
@@ -357,12 +819,25 @@ idb.Float = class IdbFloat extends idb.Number {
 		super(n);
 	}
 
+	getTypeOrder() {
+		return idb.TYPE_ORDER.FLOAT;
+	}
+
 	// This format is how InfinityDB identifies a float: always a 
-	// decimal point and 'f'. Within InfinityDB this is binary and
-	// distinguished from long and double.
-	
+	// decimal point and 'f'.
 	toString() {
-		return (Number.isInteger(this.v) ? this.v + '.0' : this.v.toString())  + 'f';
+		return (Number.isInteger(this.v) ? this.v + '.0' : this.v.toString()) + 'f';
+	}
+
+	// Floats compare by numeric value
+	compareTo(other) {
+		if (!(other instanceof idb.Float)) {
+		    // If other is not a Float, first compare by type order
+     		return this.getTypeOrder() - idb._getTypeOrderForValue(other);
+		}
+		
+		const otherValue = other instanceof idb.Float ? other.v : other;
+		return this.v - otherValue;
 	}
 }
 
@@ -370,17 +845,554 @@ idb.Long = class IdbLong extends idb.Number {
 	constructor(n) {
 		super(n);
 		if (!Number.isInteger(n)) {
-			throw new TypeError('Expected integer for Long(n) but was ' + n);
+		throw new TypeError('Expected integer for Long(n) but was ' + n);
 		}
 	}
-	
+
+	getTypeOrder() {
+		return idb.TYPE_ORDER.LONG;
+	}
+
 	// This format is how InfinityDB distinguishes a long: no decimal point.
-	// Within InfinityDB this is binary.
-	
 	toString() {
 		return this.v.toString();
 	}
+
+	// Longs compare by numeric value
+	compareTo(other) {
+		if (!(other instanceof idb.Long)) {
+			// If other is not a Long, first compare by type order
+			return this.getTypeOrder() - idb._getTypeOrderForValue(other);
+		}
+		
+		const otherValue = other instanceof idb.Long ? other.v : other;
+		return this.v - otherValue;
+	}
 }
+
+idb.String = class IdbString extends idb.Component {
+	constructor(s) {
+		super(s);
+		if (s == null) {
+			n = '';
+		} else if (typeof n !== 'string') {
+			throw new TypeError('Expected string for String(n) but was ' + n);
+		}
+	}
+
+	getTypeOrder() {
+		return idb.TYPE_ORDER.STRING;
+	}
+
+	toString() {
+		return JSON.stringify(this.v);
+	}
+
+	toJSON() {
+		return JSON.stringify(idb.key(this.v));
+	}
+
+	compareTo(other) {
+		if (!(other instanceof idb.String) && 
+			!(typeof other === 'string')) {
+		return this.getTypeOrder() - idb._getTypeOrderForValue(other);
+		}
+		
+		const otherValue = other instanceof idb.String ? other.v : other;
+		return this.v - otherValue;
+	}
+}
+
+// Helper function to wrap a JavaScript value with the appropriate IDB component
+idb.wrapValue = function(value) {
+    if (value === null || value === undefined) {
+      throw new TypeError('Cannot wrap null or undefined');
+    }
+
+	// Idempotent: if it's already a component, return it as is
+    if (idb.Component.isComponent(value)) {
+      return value;
+    }
+    
+    if (typeof value === 'string') {
+      return new idb.StringValue(value);
+    }
+    
+	// Unfortunately, JSON cannot represent a float, so we have to
+	// use a double. InfinityDB has a float type that is 32 bits.
+	// Also, we can't convert integers to idb.Long, because that would
+	// ruin the sorting order. So we have to use a double for that too.
+	// The problem is that InfinityDB keeps the float, double, and long
+	// separate as distinct data types, and sorts them separately.
+	// Try to keep the values as idb.Long() and idb.Float() for as long as possible.
+	// But if you want to use them as numbers, you can do that too.
+    if (typeof value === 'number') {
+		// Don't do this.
+    //   if (Number.isInteger(value)) {
+    //     return new idb.Long(value);
+    //   }
+      return new idb.Double(value);
+    }
+    
+    if (typeof value === 'boolean') {
+      return new idb.BooleanValue(value);
+    }
+    
+    if (value instanceof Date) {
+      return new idb.Date(value);
+    }
+    
+    if (value instanceof Uint8Array) {
+      return new idb.Bytes(value);
+    }
+    
+    throw new TypeError('Cannot wrap value: ' + value);
+}
+  
+// ItemSpace - a collection of Items with map view
+idb.ItemSpace = class IdbItemSpace {
+    constructor() {
+      this.items = [];
+      this.root = new idb.ItemNode(); // Root of the map view
+    }
+    
+    // === Set/Collection Interface ===
+    
+    // Add an item
+    addItem(item) {
+      if (!(item instanceof idb.Item)) {
+        throw new TypeError('Can only add Item objects to ItemSpace');
+      }
+      
+      this.items.push(item);
+      
+      // Update map view
+      this._addToMapView(item);
+      
+      return this;
+    }
+    
+    // Add multiple items at once
+    addItems(items) {
+      for (const item of items) {
+        this.addItem(item);
+      }
+      return this;
+    }
+    
+    // Remove an item
+    removeItem(item) {
+      const index = this.items.indexOf(item);
+      if (index !== -1) {
+        this.items.splice(index, 1);
+        
+        // Update map view
+        this._removeFromMapView(item);
+      }
+      return this;
+    }
+    
+    // Get all items
+    getItems() {
+      return [...this.items];
+    }
+    
+    // Sort items by component at a specific position
+    sortByComponent(position, descending = false) {
+      return [...this.items].sort((a, b) => {
+        if (position >= a.getLength() || position >= b.getLength()) {
+          return 0;
+        }
+        
+        const compA = a.getComponent(position);
+        const compB = b.getComponent(position);
+        
+        // Use compareTo method if available
+        if (compA.compareTo) {
+          const result = compA.compareTo(compB);
+          return descending ? -result : result;
+        }
+        
+        // Fall back to default comparison
+        const aVal = compA instanceof idb.Component ? compA.v : compA;
+        const bVal = compB instanceof idb.Component ? compB.v : compB;
+        
+        if (aVal instanceof Date && bVal instanceof Date) {
+          const result = aVal.getTime() - bVal.getTime();
+          return descending ? -result : result;
+        }
+        
+        if (typeof aVal === 'number' && typeof bVal === 'number') {
+          const result = aVal - bVal;
+          return descending ? -result : result;
+        }
+        
+        // Default to string comparison
+        const result = String(aVal).localeCompare(String(bVal));
+        return descending ? -result : result;
+      });
+    }
+    
+    // Convert all items to an IDB object and merge them
+    toIdbObject() {
+      // Merge all item objects into a single object
+      const mergedObject = {};
+      for (const item of this.items) {
+        idb.ItemSpace._deepMerge(mergedObject, item.toIdbObject());
+      }
+      return mergedObject;
+    }
+    
+    // Helper method to merge objects deeply
+    static _deepMerge(target, source) {
+      for (const key in source) {
+        if (source.hasOwnProperty(key)) {
+          if (source[key] === null) {
+            // For leaf nodes
+            target[key] = null;
+          } else if (typeof source[key] === 'object') {
+            // For nested objects
+            if (!target[key]) {
+              target[key] = {};
+            }
+            idb.ItemSpace._deepMerge(target[key], source[key]);
+          } else {
+            target[key] = source[key];
+          }
+        }
+      }
+      return target;
+    }
+    
+    // Create an ItemSpace from an IDB object
+    static fromIdbObject(obj) {
+      const space = new idb.ItemSpace();
+      const paths = [];
+      
+      // Recursively extract all paths
+      function extractPaths(current, path = []) {
+        if (current === null) {
+          paths.push([...path]);
+          return;
+        }
+        
+        if (typeof current !== 'object') {
+          return;
+        }
+        
+        for (const key in current) {
+          if (current.hasOwnProperty(key)) {
+            path.push(key);
+            extractPaths(current[key], path);
+            path.pop();
+          }
+        }
+      }
+      
+      extractPaths(obj);
+      
+      // Convert paths to items
+      for (const path of paths) {
+        const item = new idb.Item();
+        for (const key of path) {
+          item.addComponent(idb.unQuote(key));
+        }
+        
+        // Add to this space
+        space.addItem(item);
+      }
+      
+      return space;
+    }
+    
+    // === Map View Interface ===
+    
+    // Get the root map node
+    getRoot() {
+      return this.root;
+    }
+    
+    // Get a submap with the given key
+    get(key) {
+      return this.root.get(key);
+    }
+    
+    // Check if a key exists in the root
+    has(key) {
+      return this.root.has(key);
+    }
+    
+    // Get all keys at the root level
+    keys(sorted = true) {
+      return this.root.keys(sorted);
+    }
+    
+    // Get all entries [key, submap] at the root level
+    entries(sorted = true) {
+      return this.root.entries(sorted);
+    }
+    
+    // Iterate through all keys (using sorted keys by default)
+    *[Symbol.iterator]() {
+      for (const key of this.keys(true)) {
+        yield key;
+      }
+    }
+    
+    // Internal method to add an item to the map view
+    _addToMapView(item) {
+      if (item.getLength() === 0) return;
+      
+      let current = this.root;
+      
+      // Build path in the map view
+      for (let i = 0; i < item.getLength(); i++) {
+        const component = item.getComponent(i);
+        
+        if (!current.has(component)) {
+          current.set(component, new idb.ItemNode());
+        }
+        
+        current = current.get(component);
+      }
+      
+      // Mark as a leaf node
+      current.setIsLeaf(true);
+    }
+    
+    // Internal method to remove an item from the map view
+    _removeFromMapView(item) {
+      if (item.getLength() === 0) return;
+      
+      // Create a stack to track the path
+      const stack = [];
+      let current = this.root;
+      
+      // Find the path
+      for (let i = 0; i < item.getLength(); i++) {
+        const component = item.getComponent(i);
+        
+        if (!current.has(component)) {
+          return; // Item doesn't exist in the map
+        }
+        
+        stack.push({ node: current, key: component });
+        current = current.get(component);
+      }
+      
+      // Unmark as a leaf node
+      current.setIsLeaf(false);
+      
+      // Clean up empty nodes, from bottom to top
+      if (current.isEmpty()) {
+        for (let i = stack.length - 1; i >= 0; i--) {
+          const { node, key } = stack[i];
+          
+          const child = node.get(key);
+          if (child.isEmpty() && !child.isLeaf()) {
+            node.delete(key);
+          } else {
+            break;
+          }
+        }
+      }
+    }
+}
+  
+  // ItemNode - represents a node in the map view of an ItemSpace
+idb.ItemNode = class IdbItemNode {
+    constructor() {
+      this.children = new Map();
+      this.isLeafNode = false;
+    }
+    
+    // Set a key-value pair in this node
+    set(key, value) {
+      // Normalize key to handle InfinityDB components
+      const normalizedKey = key instanceof idb.Component ? key.v : key;
+      this.children.set(normalizedKey, value);
+      return this;
+    }
+    
+    // Get a child node by key
+    get(key) {
+      // Normalize key to handle InfinityDB components
+      const normalizedKey = key instanceof idb.Component ? key.v : key;
+      return this.children.get(normalizedKey) || null;
+    }
+    
+    // Check if a key exists
+    has(key) {
+      // Normalize key to handle InfinityDB components
+      const normalizedKey = key instanceof idb.Component ? key.v : key;
+      return this.children.has(normalizedKey);
+    }
+    
+    // Delete a key
+    delete(key) {
+      // Normalize key to handle InfinityDB components
+      const normalizedKey = key instanceof idb.Component ? key.v : key;
+      return this.children.delete(normalizedKey);
+    }
+    
+    // Get all keys
+    keys(sorted = true) {
+      const keys = [...this.children.keys()];
+      
+      if (sorted) {
+        keys.sort((a, b) => {
+          // Get type of each key for component ordering
+          const typeOrderA = this._getTypeOrder(a);
+          const typeOrderB = this._getTypeOrder(b);
+          
+          // First sort by component type order
+          if (typeOrderA !== typeOrderB) {
+            return typeOrderA - typeOrderB;
+          }
+          
+          // If same type, do type-specific comparison
+          if (a instanceof Date && b instanceof Date) {
+            return a.getTime() - b.getTime();
+          }
+          
+          if (typeof a === 'number' && typeof b === 'number') {
+            return a - b;
+          }
+          
+          if (a instanceof Uint8Array && b instanceof Uint8Array) {
+            // Compare byte by byte
+            const len = Math.min(a.length, b.length);
+            for (let i = 0; i < len; i++) {
+              const diff = a[i] - b[i];
+              if (diff !== 0) return diff;
+            }
+            return a.length - b.length;
+          }
+          
+          // Default to string comparison
+          return String(a).localeCompare(String(b));
+        });
+      }
+      
+      // Rewrap primitive values as components if appropriate
+      return keys.map(key => {
+        if (typeof key === 'string') {
+          // Check if it's a meta name
+          if (idb.Class.isValidName(key)) {
+            return new idb.Class(key);
+          } else if (idb.Attribute.isValidName(key)) {
+            return new idb.Attribute(key);
+          }
+        } else if (typeof key === 'number' && Number.isInteger(key)) {
+          return new idb.Index(key);
+        }
+        
+        return key;
+      });
+    }
+    
+    // Helper to determine type ordering for keys in ItemNode
+    _getTypeOrder(value) {
+      // Directly use component type order if available
+      if (value instanceof idb.Component) {
+        return value.getTypeOrder();
+      }
+      
+      // Otherwise, infer type order from primitive value
+      if (typeof value === 'string') {
+        if (idb.Class.isValidName(value)) {
+          return idb.TYPE_ORDER.CLASS;
+        } else if (idb.Attribute.isValidName(value)) {
+          return idb.TYPE_ORDER.ATTRIBUTE;
+        }
+        return idb.TYPE_ORDER.STRING;
+      }
+      
+      if (typeof value === 'number') {
+        if (Number.isInteger(value)) {
+          return idb.TYPE_ORDER.LONG;
+        }
+        return idb.TYPE_ORDER.DOUBLE;
+      }
+      
+      if (typeof value === 'boolean') {
+        return idb.TYPE_ORDER.BOOLEAN;
+      }
+      
+      if (value instanceof Date) {
+        return idb.TYPE_ORDER.DATE;
+      }
+      
+      if (value instanceof Uint8Array) {
+        return idb.TYPE_ORDER.BYTES;
+      }
+      
+      // Default
+      return idb.TYPE_ORDER.STRING;
+    }
+    
+    // Get all values
+    values() {
+      return [...this.children.values()];
+    }
+    
+    // Get all entries [key, value]
+    entries(sorted = true) {
+      const keys = this.keys(sorted);
+      return keys.map(key => {
+        const rawKey = key instanceof idb.Component ? key.v : key;
+        return [key, this.children.get(rawKey)];
+      });
+    }
+    
+    // Check if this node is empty (has no children)
+    isEmpty() {
+      return this.children.size === 0;
+    }
+    
+    // Set whether this node is a leaf node
+    setIsLeaf(isLeaf) {
+      this.isLeafNode = isLeaf;
+      return this;
+    }
+    
+    // Check if this node is a leaf node
+    isLeaf() {
+      return this.isLeafNode;
+    }
+    
+    // Get the number of children
+    size() {
+      return this.children.size;
+    }
+    
+    // Iterator over keys (using sorted keys by default)
+    *[Symbol.iterator]() {
+      for (const key of this.keys(true)) {
+        yield key;
+      }
+    }
+    
+    // Convert to a standard JS object for debugging
+    toObject() {
+      const obj = {};
+      
+      for (const [key, value] of this.children.entries()) {
+        const keyStr = key instanceof idb.Component ? key.toString() : String(key);
+        
+        if (value instanceof idb.ItemNode) {
+          obj[keyStr] = value.isEmpty() && value.isLeaf() 
+            ? null 
+            : value.toObject();
+        } else {
+          obj[keyStr] = value;
+        }
+      }
+      
+      return obj;
+    }
+}
+
 
 // Quote an object of the 12 data types to make it compatible with
 // a string object key. All of the component types have an underscore
@@ -558,6 +1570,13 @@ idb.longKey = function(n) {
 // }
 
 // Not a subclass of IdbComponent.
+// The value can be a uint8array, a string, or a JSON object. The contentType is a string.
+// This represents a blob of data, which is a sequence of bytes.
+// The contentType is a string that describes the type of data in the blob.
+// Blobs of type 'application/json' are parsed into JSON objects,
+// and if the data is already a JSON object, it is not parsed again and
+// must be of type 'application/json'
+// Blobs of type 'text/*' are parsed into strings.
 
 idb.Blob = class IdbBlob {
 	
@@ -567,9 +1586,9 @@ idb.Blob = class IdbBlob {
 		if (data != null) {
 			if (typeof contentType !== 'string') {
 				throw new TypeError('new IdbBlob() contentType must be a string' +
-					' but was ' + idb.printType(contentType));
+					' but was ' + idbPrintType(contentType));
 			}
-//			console.log("blob data type " + idb.printType(data));
+//			console.log("blob data type " + idbPrintType(data));
 			if (typeof data === 'string') {
 				if (contentType === 'application/json') {
 					this.v = JSON.parse(data);
@@ -665,10 +1684,10 @@ idb.Blob = class IdbBlob {
 	// Preserves this.
 	toBlobStructure() {
 		if (!(this.v instanceof Uint8Array)) {
-			throw new TypeError('Cannot convert to blob structure: data is not a Uint8Array ' + idb.printType(this.v));
+			throw new TypeError('Cannot convert to blob structure: data is not a Uint8Array ' + idbPrintType(this.v));
 		}
 		if (typeof this.contentType !== 'string') {
-			throw new TypeError('Cannot convert to blob structure: missing contentType string: was ' + idb.printType(this.contentType));
+			throw new TypeError('Cannot convert to blob structure: missing contentType string: was ' + idbPrintType(this.contentType));
 		}
 		const bytesArray = [];
 		for (let i = 0; i < this.v.length; i += 1024) {
@@ -684,19 +1703,19 @@ idb.Blob = class IdbBlob {
 		return structure;
 	}
 
-	static isBlob(o) {
-		if (o == null || typeof o !== 'object') {
-			return false;
-		}
-		if (o instanceof idb.Blob) {
-			return true;
-		}
-		const blobInternals = o['_com.infinitydb.blob'];
-		return blobInternals != null;
-	}
+	// static isBlob(o) {
+	// 	if (o == null || typeof o !== 'object') {
+	// 		return false;
+	// 	}
+	// 	if (o instanceof idb.Blob) {
+	// 		return true;
+	// 	}
+	// 	const blobInternals = o['_com.infinitydb.blob'];
+	// 	return blobInternals != null;
+	// }
 	
 	toJSON() {
-		console.log(JSON.stringify(this.toBlobStructure()));
+		//console.log(JSON.stringify(this.toBlobStructure()));
 		return JSON.stringify(this.toBlobStructure());
 	}
 	
@@ -723,6 +1742,25 @@ idb.Blob = class IdbBlob {
 		}
 	}
 	
+	toUint8Array() {
+		if (typeof this.v === 'string') {
+			if (!this.contentType.startsWith('text/') && 
+				this.contentType !== 'application/json') {
+				// We cannot convert a string to a Uint8Array unless it is UTF-8.
+				throw new TypeError('IdbBlob contains a string but has incompatible content type ' + this.contentType);
+			}
+			return new TextEncoder('utf-8').encode(this.v);
+		} else if (this.v instanceof Uint8Array) {
+			return  this.v;
+		} else if (typeof this.v === 'object') {
+			parseFromBlobStructure(this.v);
+			return this.v;
+		} else {
+			throw new TypeError('IdbBlob contains incompatible data of type ' +
+				idb.printType(this.v) + ' content type is ' + this.contentType);
+		}
+	}
+
 	// From an object or array, recursively construct a new one but
 	// with all possible idb.Blobs instead of their object structures.
 	// Then you can get their Uint8Array forms directly, such as for
@@ -993,21 +2031,17 @@ idb.flattenToLists = function(obj) {
 }
 
 /* The interface for running queries in browser-based JavaScript. Example:
-server = IdbAccessor("https://infinitydb.com:37411/infinitydb/data", "demo/writable", "myUser", "myPassword");
+server = IdbAccessor("https://infinitydb.com:37411/infinitydb/data", "demo/writeable", "myUser", "myPassword");
 */
 idb.Accessor = class IdbAccessor {
 	constructor(server_url, db, username, password) {
-		this.set_credentials(server_url, db, username, password);
-	}
-	set_credentials(server_url, db, username, password) {
 		this.server_url = server_url
 		this.db = db
 		this.username = username
 		this.password = password
-		this.db_url = this.server_url + "/infinitydb/data/" + this.db
+		this.db_url = this.server_url + "/" + this.db
 
 		this.auth = btoa(this.username + ":" + this.password)
-
 	}
 	async _do_request_axios(query_url, method, data, request_content_type, blob_response) {
 		let success = false;
@@ -1017,24 +2051,26 @@ idb.Accessor = class IdbAccessor {
 		const options = {
 			url: query_url,
 			method: method,
-			insecureHTTPParser: true,
 			auth: {username: this.username, password: this.password},
-			data: data,
-			headers: {
-				'Content-Type': request_content_type
-			}
 		};
+		if (data != null) {
+			options["data"] = data;
+			options["headers"] = {
+				"Content-Type": request_content_type,
+			};
+		}
 		if (blob_response) {
 			options["responseType"] = "arraybuffer";
 		}
 
 		try {
+			// The request is made using axios, which is a promise-based HTTP client for the browser and Node.js.
 			response = await axios.request(options);
 			response_content_type = response.headers.get("Content-Type");
-			success = (response.status == 200 || response.status == 205);
+			success = (response.status == 200);
 			if (success) {
 				if (blob_response) {
-					result = new Blob(response.data, {contentType: response_content_type});
+					result = new idb.Blob(response.data, response_content_type);
 				}
 				else {
 					result = response.data;
@@ -1047,9 +2083,8 @@ idb.Accessor = class IdbAccessor {
 		}
 		catch (error) {
 			console.error("Error occurred during Axios request to infinityDB Server");
-			success = false;
-			result = null;
-			response_content_type = null;
+			console.error("Error: " + error.message);
+			throw(error);
 		}
 		return [success, result, response_content_type];
 	}
@@ -1061,21 +2096,23 @@ idb.Accessor = class IdbAccessor {
 		const options = {
 			headers: {
 				"Authorization": "Basic" + this.auth,
-				"Content-Type": request_content_type
 			},
 			method: method
 		}
 		if (data != null) {
 			options['body'] = data;
+			options['headers']['Content-Type'] = request_content_type;
 		}
 		let request = new Request(query_url, options);
 		try {
 			let response = await fetch(request);
-			success = (response.status == 200 || response.status == 205);
+			success = (response.status == 200);
 			if (success) {
 				response_content_type = response.headers.get("Content-Type");
 				if (blob_response) {
-					result = await response.blob();
+					let blob = await response.blob();
+					let data = await blob.arrayBuffer();
+					result = new idb.Blob(data, response_content_type);
 
 				}
 				else if (response_content_type == "application/json") {
@@ -1089,17 +2126,12 @@ idb.Accessor = class IdbAccessor {
 		}
 		catch (error) {
 			console.error("Error occurred while connecting to InfinityDB server " + this.server_url);
-			console.error("Query URL: " + query_url);
-			console.error("Query data: " + data);
-			success = false;
-			result = null;
-			response_content_type = null;
-
+			throw(error);
 		}
 		return [success, result, response_content_type];
 	}
 	
-	_do_request(query_url, method, data=null, request_content_type="application/json", blob_response=false) {
+	_do_request(query_url, method, data=null, request_content_type=null, blob_response=false) {
 		if (typeof window == "undefined") {
 			return this._do_request_axios(query_url, method, data, request_content_type, blob_response);
 		}
@@ -1118,10 +2150,15 @@ idb.Accessor = class IdbAccessor {
 		let query_url = this.make_query_url(prefix);
 		query_url.searchParams.append("action", "execute-query");
 
-		data = idb.unflattenQueryData(data);
-		data = JSON.stringify(data);
+		let request_content_type = null;
+		if (data !== null) {
+			data = data instanceof idb.ItemSpace ? data.toIdbObject()
+					: idb.unflattenQueryData(data);
+			data = JSON.stringify(data);
+			request_content_type = "application/json";
+		}
 
-		let [success, result, content_type] = await this._do_request(query_url, "POST", data, "application/json", false);
+		let [success, result, content_type] = await this._do_request(query_url, "POST", data, request_content_type, false);
 		
 		return [success, result, content_type];
 	}
@@ -1130,23 +2167,27 @@ idb.Accessor = class IdbAccessor {
 	// get_blob([new idb.Class("Pictures"), "pic0"])
 	async get_blob(prefix) {
 		let query_url = this.make_query_url(prefix);
+		query_url.searchParams.append("action", "get-blob");
 
 		let [success, result, content_type] = await this._do_request(query_url, "GET", null, null, true);
 		return [success, result, content_type];
 
 	}
 
-	async put_json(prefix, obj) {
+	async put_json(prefix, data) {
 		let query_url = this.make_query_url(prefix);
 		query_url.searchParams.append("action", "write");
-		let data = JSON.stringify(obj);
+		data = data instanceof idb.ItemSpace ? data.toIdbObject()
+				: idb.unflattenQueryData(data);
+		data = JSON.stringify(data);
 
-		let [success, result, content_type] = await this._do_request(query_url, "POST", data, "application/json", false);
+		let [success, result, content_type] = await this._do_request(query_url, "PUT", data, "application/json", false);
 		return success;
 	}
 
 	async get_json(prefix) {
 		let query_url = this.make_query_url(prefix);
+  		query_url.searchParams.append("action", "as-json");
 
 		let [success, result, content_type] = await this._do_request(query_url, "GET", null, null, false);
 		return [success, result, content_type];
@@ -1157,7 +2198,7 @@ idb.Accessor = class IdbAccessor {
 		let query_url = this.make_query_url(prefix);
 		query_url.searchParams.append("action", "put-blob");
 
-		let [success, result, content_type] = await this._do_request(query_url, "POST", blob, blob.contentType, false);
+		let [success, result, content_type] = await this._do_request(query_url, "POST", blob.v, blob.contentType, false);
 		return success;
 	}
 
@@ -1165,7 +2206,7 @@ idb.Accessor = class IdbAccessor {
 		let query_url = this.make_query_url(prefix);
 		query_url.searchParams.append("action", "write");
 
-		let [success, result, content_type] = await this._do_request(query_url, "DELETE", null, "application/json", false);
+		let [success, result, content_type] = await this._do_request(query_url, "DELETE", null, null, false);
 		return success;
 	}
 
@@ -1174,19 +2215,57 @@ idb.Accessor = class IdbAccessor {
 	async execute_get_blob_query(prefix, data) {
 		let query_url = this.make_query_url(prefix);
 		query_url.searchParams.append("action", "execute-get-blob-query");
-		data = idb.unflattenQueryData(data);
-		data = JSON.stringify(data);
-		return this._do_request(query_url, "POST", data, "application/json", true);
+		let request_content_type = null;
+		if (data !== null) {
+			data = data instanceof idb.ItemSpace ? data.toIdbObject()
+					: idb.unflattenQueryData(data);
+			data = JSON.stringify(data);
+			request_content_type = "application/json";
+		}
+		return this._do_request(query_url, "POST", data, request_content_type, true);
 	}
 
-	async execute_put_blob_query(prefix, data, params, content_type) {
+	/* Execute a pattern query that sends a blob. The params is a json object
+	* that will be sent in the params url parameter of the request. 
+	* The params should not be very long, or we will get a very long URL.
+	* The blob is sent in the body as raw data, and is efficient and fast.
+	* The content type of the blob is sent in the content type header.
+	* We have to use this params parameter because the blob is not 
+	* necessarily a JSON object. The params url parameter can be explicitly
+	* matched in the PatternQuery as a symbol of kind 'params url parameter'
+    *
+	* It is possible to send blobs as application/json with
+	* embedded blob structures, but that is not efficient, at least
+	* until z-lib compression is implemented.
+	* However, you can embed multiple such blob structures in a single
+	* JSON object, and that is efficient in that it reduces the number of I/O
+	* operations. Use convertAllContainedBlobStructures() to do this.
+	*/
+	async execute_put_blob_query(prefix, idbBlob, params={}) {
+		if (idbBlob == null) {
+			throw new TypeError("IdbBlob is null in execute_put_blob_query()");
+		}
+		if (!(idbBlob instanceof idb.Blob)) {
+			throw new TypeError("IdbBlob is not an instance of idb.Blob in execute_put_blob_query()");
+		}
+		if (idbBlob.v == null) {
+			throw new TypeError("IdbBlob has no data in execute_put_blob_query()");
+		}
+		if (idbBlob.contentType == null) {
+			throw new TypeError("IdbBlob has no content type in execute_put_blob_query()");
+		}
+		let raw_data = idbBlob.toUint8Array();
 		let query_url = this.make_query_url(prefix);
 		query_url.searchParams.append("action", "execute-put-blob-query");
-		const params_str = JSON.stringify(idb.unflattenQueryData(params));
-		query_url.searchParams.append("params", params_str);
-		return this._do_request(query_url, "POST", data, content_type, false);
+		if (params != {}) {
+			params = params instanceof idb.ItemSpace ? params.toIdbObject()
+			: idb.unflattenQueryData(params);
+			params = JSON.stringify(params);
+			query_url.searchParams.append("params", params);
+		}
+		let content_type = idbBlob.contentType;
+		return this._do_request(query_url, "POST", raw_data, content_type, false);
 	}
-
 
 	async head() {
 		let [success, result, content_type] = await this._do_request(this.db_url, "HEAD");
@@ -1194,3 +2273,4 @@ idb.Accessor = class IdbAccessor {
 	}
 
 }
+
