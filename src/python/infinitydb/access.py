@@ -1377,7 +1377,8 @@ class InfinityDBAccessor:
         return headers
 
     def head(self):
-        full_url = self.server_url + '/' + self.db
+        full_url = self.server_url + '/infinitydb/data/' + self.db
+        full_url = self._normalize_url(full_url)
         headers = self._make_headers()
         """ To be used to verify connectivity."""
 #         request = Request('HEAD', self.server_url, headers=headers)
@@ -1421,6 +1422,11 @@ class InfinityDBAccessor:
                 raise ValueError
         return params
 
+    def _normalize_url(self, url):
+        #remove excess slashes
+        url = re.sub(r"(?<!:)/+", "/", url)
+        return url
+
     def _do_command(self, prefix, *, db, 
                     action=None,
                     content_type=None, 
@@ -1434,9 +1440,11 @@ class InfinityDBAccessor:
             kwargs['action'] = action
         if self.db is None and db is None:
             raise ValueError('Missing self.db or db')
-        full_url = (self.server_url + '/' + (db if db else self.db)
+        full_url = (self.server_url + '/infinitydb/data/' + (db if db else self.db)
                     + '/' + escape_uri_components(*prefix)
                     + self.create_params(**kwargs))
+        full_url = self._normalize_url(full_url)
+
         headers = self._make_headers(content_type=content_type)
         # requests is in python 3
         try:
